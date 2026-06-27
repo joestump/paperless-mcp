@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -8,6 +9,18 @@ import { registerCorrespondentTools } from "./tools/correspondents";
 import { registerDocumentTools } from "./tools/documents";
 import { registerDocumentTypeTools } from "./tools/documentTypes";
 import { registerTagTools } from "./tools/tags";
+
+// Build a fresh MCP server with all tools registered. A new instance is
+// created per transport/connection so concurrent HTTP requests never share
+// (and clobber) a single server's transport binding.
+function createServer(api: PaperlessAPI): McpServer {
+  const server = new McpServer({ name: "paperless-ngx", version: "1.0.0" });
+  registerDocumentTools(server, api);
+  registerTagTools(server, api);
+  registerCorrespondentTools(server, api);
+  registerDocumentTypeTools(server, api);
+  return server;
+}
 
 // Simple CLI argument parsing
 const args = process.argv.slice(2);
@@ -49,13 +62,8 @@ async function main() {
     }
   }
 
-  // Initialize API client and server once
+  // Initialize the API client once; MCP servers are created per connection.
   const api = new PaperlessAPI(baseUrl, token);
-  const server = new McpServer({ name: "paperless-ngx", version: "1.0.0" });
-  registerDocumentTools(server, api);
-  registerTagTools(server, api);
-  registerCorrespondentTools(server, api);
-  registerDocumentTypeTools(server, api);
 
   if (useHttp) {
     const app = express();
@@ -66,11 +74,14 @@ async function main() {
 
     app.post("/mcp", async (req, res) => {
       try {
+        // Stateless: a fresh server + transport per request.
+        const server = createServer(api);
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: undefined,
         });
         res.on("close", () => {
           transport.close();
+          server.close();
         });
         await server.connect(transport);
         await transport.handleRequest(req, res, req.body);
@@ -118,11 +129,14 @@ async function main() {
     app.get("/sse", async (req, res) => {
       console.log("SSE request received");
       try {
+        // Each SSE connection gets its own server instance as well.
+        const server = createServer(api);
         const transport = new SSEServerTransport("/messages", res);
         sseTransports[transport.sessionId] = transport;
         res.on("close", () => {
           delete sseTransports[transport.sessionId];
           transport.close();
+          server.close();
         });
         await server.connect(transport);
       } catch (error) {
@@ -156,6 +170,7 @@ async function main() {
       );
     });
   } else {
+    const server = createServer(api);
     const transport = new StdioServerTransport();
     await server.connect(transport);
   }
