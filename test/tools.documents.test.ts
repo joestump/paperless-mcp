@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { registerDocumentTools } from "../src/tools/documents";
 import { captureTools, fakeApi } from "./helpers";
 
@@ -143,6 +143,18 @@ describe("update_document", () => {
     await expect(tools.update_document.handler({ id: 7 })).rejects.toThrow(
       /at least one/i
     );
+  });
+
+  it("does NOT throw when a real update returns an empty (204) body", async () => {
+    // Regression guard: the 'at least one change' check keys off whether an
+    // operation was *requested* (body had fields), not the response value.
+    // A successful PATCH that returns null must still resolve, so the guard
+    // must use === undefined, not == null.
+    const api = fakeApi({ updateDocument: vi.fn(async () => null) });
+    const { tools } = docTools(api);
+    const res = await tools.update_document.handler({ id: 7, title: "New" });
+    expect(api.updateDocument).toHaveBeenCalledWith(7, { title: "New" });
+    expect(res).toEqual({ document: null, note: undefined });
   });
 });
 
