@@ -80,7 +80,7 @@ export function registerDocumentTools(server, api) {
         .optional().describe("Permission settings when method is 'set_permissions'. Controls who can view and edit the documents."),
       metadata_document_id: z.number().optional().describe("Source document ID when merging documents. The metadata from this document will be preserved."),
       delete_originals: z.boolean().optional().describe("Whether to delete original documents after merge/split operations. Use with caution."),
-      pages: z.string().optional().describe("Page specification for delete_pages method. Format: '1,3,5-7' to delete pages 1, 3, and 5 through 7."),
+      pages: z.string().optional().describe("Page specification (1-indexed). The accepted format depends on the method. For 'split': a comma-separated list of split points where ranges define each output document, e.g. '1,3,5-7' produces three documents containing [page 1], [page 3], [pages 5,6,7]. For 'delete_pages': a comma-separated list of individual page numbers to remove, e.g. '2,3,4' (ranges are NOT supported here and will be rejected). Required for both 'split' and 'delete_pages'."),
       degrees: z.number().optional().describe("Rotation angle in degrees when method is 'rotate'. Use 90, 180, or 270 for standard rotations."),
     },
     async (args, extra) => {
@@ -95,6 +95,32 @@ export function registerDocumentTools(server, api) {
         const { permissions, ...others } = rest;
         parameters = { ...others, ...permissions };
       }
+
+      // The `pages` parameter is overloaded across two methods with different
+      // wire shapes (verified against BulkEditSerializer in
+      // src/documents/serialisers.py):
+      //   - split:        the API parses the raw string "1,3,5-7" itself, so
+      //                   forward it untouched.
+      //   - delete_pages: the API requires a JSON list of integers (no ranges),
+      //                   so expand "2,3,4" -> [2, 3, 4] before sending and
+      //                   reject ranges / non-integers with a clear error.
+      if (method === "split") {
+        if (!rest.pages) {
+          throw new Error("The 'split' method requires a 'pages' string, e.g. '1,3,5-7'.");
+        }
+      } else if (method === "delete_pages") {
+        if (!rest.pages) {
+          throw new Error("The 'delete_pages' method requires a 'pages' string of page numbers, e.g. '2,3,4'.");
+        }
+        const parsed = rest.pages.split(",").map((p) => p.trim());
+        if (parsed.some((p) => !/^\d+$/.test(p))) {
+          throw new Error(
+            "The 'delete_pages' method only accepts individual page numbers (e.g. '2,3,4'); ranges like '5-7' are not supported. Use the 'split' method for ranges."
+          );
+        }
+        parameters = { ...parameters, pages: parsed.map((p) => parseInt(p, 10)) };
+      }
+
       return api.bulkEditDocuments(documents, method, parameters);
     }
   );
