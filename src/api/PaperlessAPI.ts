@@ -139,27 +139,48 @@ export class PaperlessAPI {
     return this.request(`/documents/${id}/`);
   }
 
-  async searchDocuments(query, page?, pageSize?) {
-    const params = new URLSearchParams();
-    params.set("query", query);
-    if (page) params.set("page", page.toString());
-    if (pageSize) params.set("page_size", pageSize.toString());
-    
-    const response: any = await this.request(`/documents/?${params.toString()}`);
-    
-    // Filter out content field and long URLs to reduce token usage
-    if (response.results) {
+  // Strip the bulky/duplicative fields (full OCR content, long URLs) from a
+  // documents list response so results don't blow the context window. Shared
+  // by every list path that returns whole documents.
+  private stripDocumentListResponse(response: any) {
+    if (response && response.results) {
       response.results = response.results.map((doc: any) => {
         const { content, download_url, thumbnail_url, ...rest } = doc;
-        return {
-          ...rest,
-          // Include only document ID for constructing URLs if needed
-          id: doc.id,
-        };
+        return { ...rest, id: doc.id };
       });
     }
-    
     return response;
+  }
+
+  async searchDocuments(
+    query?: string,
+    page?: number,
+    pageSize?: number,
+    customFieldQuery?: string
+  ) {
+    const params = new URLSearchParams();
+    // Both query and custom_field_query are optional individually; the documents
+    // endpoint accepts either or both. An empty query string is omitted so we
+    // don't send a meaningless empty full-text search.
+    if (query) params.set("query", query);
+    if (customFieldQuery) params.set("custom_field_query", customFieldQuery);
+    if (page) params.set("page", page.toString());
+    if (pageSize) params.set("page_size", pageSize.toString());
+
+    const response: any = await this.request(`/documents/?${params.toString()}`);
+    return this.stripDocumentListResponse(response);
+  }
+
+  // Find documents similar to a given document using the search backend's
+  // "more like this" feature (/api/documents/?more_like_id=<id>).
+  async getSimilarDocuments(id: number, page?: number, pageSize?: number) {
+    const params = new URLSearchParams();
+    params.set("more_like_id", id.toString());
+    if (page) params.set("page", page.toString());
+    if (pageSize) params.set("page_size", pageSize.toString());
+
+    const response: any = await this.request(`/documents/?${params.toString()}`);
+    return this.stripDocumentListResponse(response);
   }
 
   async downloadDocument(id, asOriginal = false) {
