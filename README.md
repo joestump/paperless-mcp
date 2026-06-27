@@ -90,15 +90,43 @@ get_document({
 ```
 
 #### search_documents
-Full-text search across documents.
+Full-text search across documents and/or structured filtering by custom-field values.
 
 Parameters:
-- query: Search query string
+- query (optional): Full-text search query string (Paperless syntax). Optional when custom_field_query is given.
+- custom_field_query (optional): JSON expression filtering by custom-field values. An atom `[field, operator, value]` or a logical combination `["AND"|"OR", [atoms]]` / `["NOT", atom]` (may nest). `field` is a custom field ID or name. Operators: all types support `exact`/`in`/`isnull`/`exists`; string/url/longtext add `icontains`/`istartswith`/`iendswith`; numeric/date/monetary add `gt`/`gte`/`lt`/`lte`/`range`; documentlink adds `contains`. Accepts the array form or a pre-stringified JSON string.
+- page (optional): Page number
+- page_size (optional): Results per page
 
 ```typescript
+// Full-text
+search_documents({ query: "invoice 2024" })
+
+// Custom-field filter (structured form)
 search_documents({
-  query: "invoice 2024"
+  custom_field_query: ["AND", [
+    ["Status", "exact", "Paid"],
+    ["Amount", "range", [100, 500]]
+  ]]
 })
+
+// Combined
+search_documents({
+  query: "invoice",
+  custom_field_query: ["Due Date", "lt", "2024-12-31"]
+})
+```
+
+#### find_similar_documents
+Find documents similar to a given one using Paperless-NGX's "more like this" search.
+
+Parameters:
+- id: Reference document ID
+- page (optional): Page number
+- page_size (optional): Results per page
+
+```typescript
+find_similar_documents({ id: 123 })
 ```
 
 #### download_document
@@ -135,6 +163,7 @@ Parameters:
   - rotate: Rotate document pages
   - delete_pages: Delete specific pages from a document
   - modify_custom_fields: Add/remove custom field values on documents
+  - edit_pdf: Per-page rotate/reorder/split of a single document's PDF
 - Additional parameters based on method:
   - correspondent: ID for set_correspondent
   - document_type: ID for set_document_type
@@ -149,6 +178,10 @@ Parameters:
   - degrees: Number for rotate (90, 180, or 270)
   - add_custom_fields: For modify_custom_fields — array of custom field IDs ([1,2]) or an object mapping field ID to value ({"3": "2024-01-01"})
   - remove_custom_fields: For modify_custom_fields — array of custom field IDs to remove
+  - operations: For edit_pdf — ordered array of {page, rotate?, doc?} per-page operations on a single document (documents must contain exactly one ID)
+  - update_document: For edit_pdf — modify the document in place instead of creating new ones (default false)
+  - include_metadata: For edit_pdf — copy source metadata onto the result (default true)
+  - delete_original: For edit_pdf — delete the original after editing (default false)
 
 Examples:
 ```typescript
@@ -187,6 +220,24 @@ bulk_edit_documents({
   method: "modify_tags",
   add_tags: [1, 2],
   remove_tags: [3, 4]
+})
+
+// Add/remove custom field values
+bulk_edit_documents({
+  documents: [12, 13],
+  method: "modify_custom_fields",
+  add_custom_fields: { "3": "2024-01-01" },
+  remove_custom_fields: [4]
+})
+
+// Rotate page 2 of a single document and split it into two output docs
+bulk_edit_documents({
+  documents: [14],
+  method: "edit_pdf",
+  operations: [
+    { page: 1, doc: 0 },
+    { page: 2, rotate: 90, doc: 1 }
+  ]
 })
 ```
 

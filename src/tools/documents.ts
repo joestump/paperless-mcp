@@ -54,7 +54,8 @@ export function registerDocumentTools(server, api) {
         "rotate",
         "delete_pages",
         "modify_custom_fields",
-      ]).describe("The bulk operation to perform: set_correspondent (assign sender/receiver), set_document_type (categorize documents), set_storage_path (organize file location), add_tag/remove_tag/modify_tags (manage labels), delete (permanently remove), reprocess (re-run OCR/indexing), set_permissions (control access), merge (combine documents), split (separate into multiple), rotate (adjust orientation), delete_pages (remove specific pages), modify_custom_fields (add/remove custom field values)"),
+        "edit_pdf",
+      ]).describe("The bulk operation to perform: set_correspondent (assign sender/receiver), set_document_type (categorize documents), set_storage_path (organize file location), add_tag/remove_tag/modify_tags (manage labels), delete (permanently remove), reprocess (re-run OCR/indexing), set_permissions (control access), merge (combine documents), split (separate into multiple), rotate (adjust orientation), delete_pages (remove specific pages), modify_custom_fields (add/remove custom field values), edit_pdf (per-page rotate/reorder/split a SINGLE document's PDF)"),
       correspondent: z.number().optional().describe("ID of correspondent to assign when method is 'set_correspondent'. Use list_correspondents to get valid IDs."),
       document_type: z.number().optional().describe("ID of document type to assign when method is 'set_document_type'. Use list_document_types to get valid IDs."),
       storage_path: z.number().optional().describe("ID of storage path to assign when method is 'set_storage_path'. Storage paths organize documents in folder hierarchies."),
@@ -94,6 +95,19 @@ export function registerDocumentTools(server, api) {
         .array(z.number())
         .optional()
         .describe("Array of custom field IDs to remove from the documents when method is 'modify_custom_fields'. Use list_custom_fields to get valid IDs."),
+      operations: z
+        .array(
+          z.object({
+            page: z.number().int().min(1).describe("1-indexed page number in the source document this operation applies to."),
+            rotate: z.number().optional().describe("Optional rotation for this page in degrees (90, 180, or 270)."),
+            doc: z.number().int().optional().describe("Optional 0-indexed output document index. Pages sharing the same 'doc' value are grouped into the same resulting document, letting you reorder pages and split into multiple documents. Omit to keep all pages in a single output document."),
+          })
+        )
+        .optional()
+        .describe("Required when method is 'edit_pdf'. An ordered list of per-page operations on a SINGLE document's PDF (the 'documents' array must contain exactly one ID). Each entry selects a source 'page' and may 'rotate' it and/or assign it to an output 'doc'. The order of entries determines the page order in the output. Pages out of bounds for the document are rejected by the API."),
+      update_document: z.boolean().optional().describe("For 'edit_pdf': when true, modify the existing document in place instead of creating new document(s). Default false."),
+      include_metadata: z.boolean().optional().describe("For 'edit_pdf': when true (default), copy the source document's metadata (tags, correspondent, type, custom fields, etc.) onto the resulting document(s)."),
+      delete_original: z.boolean().optional().describe("For 'edit_pdf': when true, delete the original document after producing the edited output. Default false."),
     },
     async (args, extra) => {
       if (!api) throw new Error("Please configure API connection first");
@@ -131,6 +145,16 @@ export function registerDocumentTools(server, api) {
           );
         }
         parameters = { ...parameters, pages: parsed.map((p) => parseInt(p, 10)) };
+      } else if (method === "edit_pdf") {
+        // The API restricts edit_pdf to a single document (operations index
+        // pages of one PDF), so fail fast with a clear message rather than
+        // letting the request 400.
+        if (documents.length !== 1) {
+          throw new Error("The 'edit_pdf' method operates on exactly one document; pass a single ID in 'documents'.");
+        }
+        if (!rest.operations || rest.operations.length === 0) {
+          throw new Error("The 'edit_pdf' method requires a non-empty 'operations' array.");
+        }
       }
 
       return api.bulkEditDocuments(documents, method, parameters);
@@ -183,15 +207,51 @@ export function registerDocumentTools(server, api) {
 
   server.tool(
     "search_documents",
-    "Search through documents using full-text search across content, titles, tags, and metadata. Returns document metadata WITHOUT the full OCR content field to prevent token overflow. Use get_document to retrieve full details for specific documents of interest. Supports Paperless-NGX advanced query syntax.",
+    "Search through documents using full-text search across content, titles, tags, and metadata, and/or structured filtering by custom-field values. Returns document metadata WITHOUT the full OCR content field to prevent token overflow. Use get_document to retrieve full details for specific documents of interest. Supports Paperless-NGX advanced query syntax.",
     {
-      query: z.string().describe("Search query using Paperless-NGX syntax. By default, matches documents containing ALL words. Advanced syntax: Field searches: 'tag:unpaid', 'type:invoice', 'correspondent:university'. Logical operators: 'term1 AND (term2 OR term3)'. Date ranges: 'created:[2020 to 2024]', 'added:yesterday', 'modified:today'. Wildcards: 'prod*name'. Combine multiple criteria as needed. Search looks through document content, title, correspondent, type, and tags."),
+      query: z.string().optional().describe("Full-text search query using Paperless-NGX syntax. By default, matches documents containing ALL words. Advanced syntax: Field searches: 'tag:unpaid', 'type:invoice', 'correspondent:university'. Logical operators: 'term1 AND (term2 OR term3)'. Date ranges: 'created:[2020 to 2024]', 'added:yesterday', 'modified:today'. Wildcards: 'prod*name'. Optional when custom_field_query is provided. Search looks through document content, title, correspondent, type, and tags."),
+      custom_field_query: z
+        .union([z.string(), z.array(z.any())])
+        .optional()
+        .describe(
+          "Structured filter on custom-field values, applied in addition to (or instead of) the full-text query. A JSON expression that is either an atom [field, operator, value] or a logical combination [\"AND\"|\"OR\", [atom, ...]] / [\"NOT\", atom], which may nest. 'field' is a custom field's ID or name. Operators by field type: all types support 'exact', 'in', 'isnull', 'exists'; string/url/longtext also support 'icontains', 'istartswith', 'iendswith'; integer/float/date/monetary also support 'gt', 'gte', 'lt', 'lte', 'range'; documentlink supports 'contains'. Examples: [\"Invoice Number\", \"exact\", \"INV-42\"]; [\"Amount\", \"range\", [10, 100]]; [\"AND\", [[\"Status\", \"exact\", \"Paid\"], [\"Due Date\", \"lt\", \"2024-12-31\"]]]. Accepts either the array form or a pre-stringified JSON string."
+        ),
       page: z.number().optional().describe("Page number for pagination (starts at 1). Use to browse through large result sets without hitting token limits."),
       page_size: z.number().optional().describe("Number of documents per page (default 25, max 100). Smaller page sizes help avoid token limits when many documents match."),
     },
     async (args, extra) => {
       if (!api) throw new Error("Please configure API connection first");
-      return api.searchDocuments(args.query, args.page, args.page_size);
+      if (!args.query && args.custom_field_query === undefined) {
+        throw new Error("search_documents requires at least one of 'query' or 'custom_field_query'.");
+      }
+      // The API expects custom_field_query as a JSON string; accept either the
+      // structured array form (stringify it) or an already-encoded string.
+      const customFieldQuery =
+        args.custom_field_query === undefined
+          ? undefined
+          : typeof args.custom_field_query === "string"
+            ? args.custom_field_query
+            : JSON.stringify(args.custom_field_query);
+      return api.searchDocuments(
+        args.query,
+        args.page,
+        args.page_size,
+        customFieldQuery
+      );
+    }
+  );
+
+  server.tool(
+    "find_similar_documents",
+    "Find documents similar to a given document using Paperless-NGX's 'more like this' search (semantic/content similarity via the search index). Useful for discovering related paperwork, duplicates, or documents from the same context. Returns document metadata WITHOUT the full OCR content field to prevent token overflow.",
+    {
+      id: z.number().describe("ID of the reference document to find similar documents for. Get this from search_documents or get_document results."),
+      page: z.number().optional().describe("Page number for pagination (starts at 1)."),
+      page_size: z.number().optional().describe("Number of documents per page (default 25, max 100)."),
+    },
+    async (args, extra) => {
+      if (!api) throw new Error("Please configure API connection first");
+      return api.getSimilarDocuments(args.id, args.page, args.page_size);
     }
   );
 
