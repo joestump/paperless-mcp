@@ -6,9 +6,12 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import express from "express";
 import { PaperlessAPI } from "./api/PaperlessAPI";
 import { registerCorrespondentTools } from "./tools/correspondents";
+import { registerCustomFieldTools } from "./tools/customFields";
 import { registerDocumentTools } from "./tools/documents";
 import { registerDocumentTypeTools } from "./tools/documentTypes";
+import { registerStoragePathTools } from "./tools/storagePaths";
 import { registerTagTools } from "./tools/tags";
+import { registerTaskTools } from "./tools/tasks";
 
 // Build a fresh MCP server with all tools registered. A new instance is
 // created per transport/connection so concurrent HTTP requests never share
@@ -19,6 +22,9 @@ function createServer(api: PaperlessAPI): McpServer {
   registerTagTools(server, api);
   registerCorrespondentTools(server, api);
   registerDocumentTypeTools(server, api);
+  registerStoragePathTools(server, api);
+  registerCustomFieldTools(server, api);
+  registerTaskTools(server, api);
   return server;
 }
 
