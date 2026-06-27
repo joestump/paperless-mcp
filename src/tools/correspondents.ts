@@ -1,17 +1,18 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp";
 import { z } from "zod";
 import {
   matchingAlgorithmSchema,
   resolveMatchingAlgorithm,
 } from "../utils/matching";
 
-export function registerCorrespondentTools(server: McpServer, api) {
+export function registerCorrespondentTools(server, api) {
   server.tool(
     "list_correspondents",
     "Retrieve all available correspondents (people, companies, organizations that send/receive documents). Returns names and automatic matching patterns for document assignment.",
-    { }, async (args, extra) => {
+    {
+      full_perms: z.boolean().optional().describe("When true, include each correspondent's object-level permissions (owner plus per-user/per-group view and change permissions)."),
+    }, async (args, extra) => {
     if (!api) throw new Error("Please configure API connection first");
-    return api.getCorrespondents();
+    return api.getCorrespondents(args.full_perms);
   });
 
   server.tool(
@@ -28,6 +29,41 @@ export function registerCorrespondentTools(server: McpServer, api) {
         ...args,
         matching_algorithm: resolveMatchingAlgorithm(args.matching_algorithm),
       });
+    }
+  );
+
+  server.tool(
+    "update_correspondent",
+    "Update an existing correspondent's name, matching rule, or owner. Only the fields you provide are changed (PATCH semantics).",
+    {
+      id: z.number().describe("ID of the correspondent to update. Use list_correspondents to find valid IDs."),
+      name: z.string().optional().describe("New name for the correspondent. Must be unique."),
+      match: z.string().optional().describe("New text pattern for automatic assignment. Empty string removes auto-matching."),
+      matching_algorithm: matchingAlgorithmSchema.optional(),
+      is_insensitive: z.boolean().optional().describe("Whether text matching is case-insensitive."),
+      owner: z.number().nullable().optional().describe("User ID to set as owner, or null to remove ownership."),
+    },
+    async (args, extra) => {
+      if (!api) throw new Error("Please configure API connection first");
+      const { id, matching_algorithm, ...rest } = args;
+      const data: Record<string, any> = { ...rest };
+      if (matching_algorithm !== undefined) {
+        data.matching_algorithm = resolveMatchingAlgorithm(matching_algorithm);
+      }
+      return api.updateCorrespondent(id, data);
+    }
+  );
+
+  server.tool(
+    "delete_correspondent",
+    "Permanently delete a correspondent. This removes the correspondent from all documents that currently reference it. Use with caution.",
+    {
+      id: z.number().describe("ID of the correspondent to permanently delete. Use list_correspondents to find valid IDs."),
+    },
+    async (args, extra) => {
+      if (!api) throw new Error("Please configure API connection first");
+      await api.deleteCorrespondent(args.id);
+      return { deleted: true, id: args.id };
     }
   );
 

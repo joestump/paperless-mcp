@@ -9,11 +9,11 @@ export function registerStoragePathTools(server, api) {
     "list_storage_paths",
     "Retrieve all storage paths. Storage paths control where a document's files are stored on disk using a path template (e.g. '{correspondent}/{created_year}'). Returns each path's ID, name, template, and matching rules. Use the returned IDs with post_document, update_document, or bulk_edit_documents (set_storage_path).",
     {
-      // No parameters - returns all storage paths
+      full_perms: z.boolean().optional().describe("When true, include each storage path's object-level permissions (owner plus per-user/per-group view and change permissions)."),
     },
     async (args, extra) => {
       if (!api) throw new Error("Please configure API connection first");
-      return api.getStoragePaths();
+      return api.getStoragePaths(args.full_perms);
     }
   );
 

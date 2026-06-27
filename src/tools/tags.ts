@@ -9,10 +9,10 @@ export function registerTagTools(server, api) {
     "list_tags",
     "Retrieve all available tags for labeling and organizing documents. Returns tag names, colors, and matching rules for automatic assignment.",
     {
-    // No parameters - returns all available tags
-  }, async (args, extra) => {
+      full_perms: z.boolean().optional().describe("When true, include each tag's object-level permissions (owner plus per-user/per-group view and change permissions)."),
+    }, async (args, extra) => {
     if (!api) throw new Error("Please configure API connection first");
-    return api.getTags();
+    return api.getTags(args.full_perms);
   });
 
   server.tool(
