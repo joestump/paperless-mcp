@@ -25,12 +25,22 @@ export class PaperlessAPI {
     });
 
     if (!response.ok) {
+      // The error body is not guaranteed to be JSON (e.g. a gateway HTML page
+      // or an empty body), so read it as text once and parse defensively.
+      // This never lets the diagnostic logging mask the underlying HTTP status.
+      const raw = await response.text().catch(() => "");
+      let body: unknown = raw;
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        // Not JSON — keep the raw text for the log.
+      }
       console.error({
         error: "Error executing request",
         url,
         options,
         status: response.status,
-        response: await response.json(),
+        response: body,
       });
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -139,6 +149,9 @@ export class PaperlessAPI {
         },
       }
     );
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
     return response;
   }
 
