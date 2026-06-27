@@ -1,14 +1,18 @@
 import { z } from "zod";
+import {
+  matchingAlgorithmSchema,
+  resolveMatchingAlgorithm,
+} from "../utils/matching";
 
 export function registerTagTools(server, api) {
   server.tool(
     "list_tags",
     "Retrieve all available tags for labeling and organizing documents. Returns tag names, colors, and matching rules for automatic assignment.",
     {
-    // No parameters - returns all available tags
-  }, async (args, extra) => {
+      full_perms: z.boolean().optional().describe("When true, include each tag's object-level permissions (owner plus per-user/per-group view and change permissions)."),
+    }, async (args, extra) => {
     if (!api) throw new Error("Please configure API connection first");
-    return api.getTags();
+    return api.getTags(args.full_perms);
   });
 
   server.tool(
@@ -21,11 +25,14 @@ export function registerTagTools(server, api) {
         .regex(/^#[0-9A-Fa-f]{6}$/)
         .optional().describe("Hex color code for visual identification (e.g., '#FF0000' for red, '#00FF00' for green). If not provided, Paperless assigns a random color."),
       match: z.string().optional().describe("Text pattern to automatically assign this tag to matching documents. Use keywords, phrases, or regular expressions depending on matching_algorithm."),
-      matching_algorithm: z.number().int().min(0).max(4).optional().describe("How to match text patterns: 0=any word, 1=all words, 2=exact phrase, 3=regular expression, 4=fuzzy matching. Default is 0 (any word)."),
+      matching_algorithm: matchingAlgorithmSchema.optional(),
     },
     async (args, extra) => {
       if (!api) throw new Error("Please configure API connection first");
-      return api.createTag(args);
+      return api.createTag({
+        ...args,
+        matching_algorithm: resolveMatchingAlgorithm(args.matching_algorithm),
+      });
     }
   );
 
@@ -40,11 +47,14 @@ export function registerTagTools(server, api) {
         .regex(/^#[0-9A-Fa-f]{6}$/)
         .optional().describe("New hex color code for visual identification (e.g., '#FF0000' for red). Leave empty to keep current color."),
       match: z.string().optional().describe("Text pattern for automatic tag assignment. Empty string removes auto-matching. Use keywords, phrases, or regex depending on matching_algorithm."),
-      matching_algorithm: z.number().int().min(0).max(4).optional().describe("Algorithm for pattern matching: 0=any word, 1=all words, 2=exact phrase, 3=regular expression, 4=fuzzy matching."),
+      matching_algorithm: matchingAlgorithmSchema.optional(),
     },
     async (args, extra) => {
       if (!api) throw new Error("Please configure API connection first");
-      return api.updateTag(args.id, args);
+      return api.updateTag(args.id, {
+        ...args,
+        matching_algorithm: resolveMatchingAlgorithm(args.matching_algorithm),
+      });
     }
   );
 

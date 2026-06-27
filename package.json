@@ -10,7 +10,9 @@
     "build"
   ],
   "scripts": {
-    "test": "tsc --noEmit",
+    "test": "tsc --noEmit && vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
     "start": "ts-node src/index.ts",
     "build": "tsc",
     "prepublishOnly": "npm run build",
@@ -39,6 +41,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.17",
-    "ts-node": "^10.9.2"
+    "ts-node": "^10.9.2",
+    "vitest": "^4.1.9"
   }
 }

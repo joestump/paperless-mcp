@@ -1,6 +1,6 @@
 # Paperless-NGX MCP Server
 
-An MCP (Model Context Protocol) server for interacting with a Paperless-NGX API server. This server provides tools for managing documents, tags, correspondents, and document types in your Paperless-NGX instance.
+An MCP (Model Context Protocol) server for interacting with a Paperless-NGX API server. This server provides tools for managing documents, tags, correspondents, document types, storage paths, and custom fields in your Paperless-NGX instance, plus polling background tasks.
 
 ## Quick Start
 
@@ -82,6 +82,7 @@ Get a specific document by ID.
 
 Parameters:
 - id: Document ID
+- full_perms (optional): When true, include the document's object-level permissions (owner plus per-user/per-group view/change permissions)
 
 ```typescript
 get_document({
@@ -89,24 +90,66 @@ get_document({
 })
 ```
 
+> Note: `full_perms` is also accepted by `search_documents`, `list_tags`, `list_correspondents`, `list_document_types`, and `list_storage_paths` to include object permissions in their results.
+
 #### search_documents
-Full-text search across documents.
+Full-text search across documents and/or structured filtering by custom-field values.
 
 Parameters:
-- query: Search query string
+- query (optional): Full-text search query string (Paperless syntax). Optional when custom_field_query is given.
+- custom_field_query (optional): JSON expression filtering by custom-field values. An atom `[field, operator, value]` or a logical combination `["AND"|"OR", [atoms]]` / `["NOT", atom]` (may nest). `field` is a custom field ID or name. Operators: all types support `exact`/`in`/`isnull`/`exists`; string/url/longtext add `icontains`/`istartswith`/`iendswith`; numeric/date/monetary add `gt`/`gte`/`lt`/`lte`/`range`; documentlink adds `contains`. Accepts the array form or a pre-stringified JSON string.
+- page (optional): Page number
+- page_size (optional): Results per page
 
 ```typescript
+// Full-text
+search_documents({ query: "invoice 2024" })
+
+// Custom-field filter (structured form)
 search_documents({
-  query: "invoice 2024"
+  custom_field_query: ["AND", [
+    ["Status", "exact", "Paid"],
+    ["Amount", "range", [100, 500]]
+  ]]
+})
+
+// Combined
+search_documents({
+  query: "invoice",
+  custom_field_query: ["Due Date", "lt", "2024-12-31"]
 })
 ```
 
+#### find_similar_documents
+Find documents similar to a given one using Paperless-NGX's "more like this" search.
+
+Parameters:
+- id: Reference document ID
+- page (optional): Page number
+- page_size (optional): Results per page
+
+```typescript
+find_similar_documents({ id: 123 })
+```
+
+#### autocomplete_search
+Get search-term autocomplete suggestions from the full-text index.
+
+Parameters:
+- term: Partial search term to complete
+- limit (optional): Max suggestions (server default 10)
+
+```typescript
+autocomplete_search({ term: "inv" })
+```
+
 #### download_document
-Download a document file by ID.
+Download a document file by ID, returned as base64. The file is returned inline, so large files are rejected unless you raise `max_bytes` (to avoid overflowing the context window).
 
 Parameters:
 - id: Document ID
 - original (optional): If true, downloads original file instead of archived version
+- max_bytes (optional): Maximum file size to return in bytes (default 10 MB). Larger downloads error out instead of returning a giant blob.
 
 ```typescript
 download_document({
@@ -134,6 +177,8 @@ Parameters:
   - split: Split a document into multiple documents
   - rotate: Rotate document pages
   - delete_pages: Delete specific pages from a document
+  - modify_custom_fields: Add/remove custom field values on documents
+  - edit_pdf: Per-page rotate/reorder/split of a single document's PDF
 - Additional parameters based on method:
   - correspondent: ID for set_correspondent
   - document_type: ID for set_document_type
@@ -144,8 +189,14 @@ Parameters:
   - permissions: Object for set_permissions with owner, permissions, merge flag
   - metadata_document_id: ID for merge to specify metadata source
   - delete_originals: Boolean for merge/split
-  - pages: String for split "[1,2-3,4,5-7]" or delete_pages "[2,3,4]"
+  - pages: Page spec (1-indexed). For split: comma-separated split points with ranges, e.g. "1,3,5-7" → three docs [1],[3],[5,6,7]. For delete_pages: comma-separated individual page numbers, e.g. "2,3,4" (ranges not allowed). Required for both methods.
   - degrees: Number for rotate (90, 180, or 270)
+  - add_custom_fields: For modify_custom_fields — array of custom field IDs ([1,2]) or an object mapping field ID to value ({"3": "2024-01-01"})
+  - remove_custom_fields: For modify_custom_fields — array of custom field IDs to remove
+  - operations: For edit_pdf — ordered array of {page, rotate?, doc?} per-page operations on a single document (documents must contain exactly one ID)
+  - update_document: For edit_pdf — modify the document in place instead of creating new ones (default false)
+  - include_metadata: For edit_pdf — copy source metadata onto the result (default true)
+  - delete_original: For edit_pdf — delete the original after editing (default false)
 
 Examples:
 ```typescript
@@ -185,6 +236,24 @@ bulk_edit_documents({
   add_tags: [1, 2],
   remove_tags: [3, 4]
 })
+
+// Add/remove custom field values
+bulk_edit_documents({
+  documents: [12, 13],
+  method: "modify_custom_fields",
+  add_custom_fields: { "3": "2024-01-01" },
+  remove_custom_fields: [4]
+})
+
+// Rotate page 2 of a single document and split it into two output docs
+bulk_edit_documents({
+  documents: [14],
+  method: "edit_pdf",
+  operations: [
+    { page: 1, doc: 0 },
+    { page: 2, rotate: 90, doc: 1 }
+  ]
+})
 ```
 
 #### post_document
@@ -200,7 +269,7 @@ Parameters:
 - storage_path (optional): ID of a storage path
 - tags (optional): Array of tag IDs
 - archive_serial_number (optional): Archive serial number
-- custom_fields (optional): Array of custom field IDs
+- custom_fields (optional): Either an array of custom field IDs ([1,2]) or an object mapping field ID to value ({"3": "2024-01-01", "4": 42})
 
 ```typescript
 post_document({
@@ -213,6 +282,54 @@ post_document({
   tags: [1, 3],
   archive_serial_number: "2024-001"
 })
+```
+
+#### update_document
+Update a single document's metadata (PATCH — only the fields you pass are changed). Use bulk_edit_documents for many documents at once.
+
+Parameters:
+- id: Document ID
+- title (optional): New title
+- created (optional): Creation date (ISO date or datetime)
+- correspondent (optional): Correspondent ID, or null to clear
+- document_type (optional): Document type ID, or null to clear
+- storage_path (optional): Storage path ID, or null to clear
+- tags (optional): Full array of tag IDs (replaces existing tags)
+- archive_serial_number (optional): Integer ASN, or null to clear
+- owner (optional): User ID, or null to remove ownership
+- custom_fields (optional): Array of {field: id, value: ...} (replaces existing custom-field set)
+- add_note (optional): Text of a note to append (notes are a separate sub-resource)
+
+```typescript
+update_document({
+  id: 123,
+  title: "Corrected Title",
+  correspondent: 5,
+  custom_fields: [{ field: 3, value: "2024-01-19" }],
+  add_note: "Reviewed and reclassified"
+})
+```
+
+#### delete_document
+Permanently delete a single document (may move to trash depending on instance settings).
+
+Parameters:
+- id: Document ID
+
+```typescript
+delete_document({ id: 123 })
+```
+
+#### get_task
+Look up a background task by its Celery UUID — used to poll the result of `post_document` (which returns only a task UUID).
+
+Parameters:
+- task_id (optional): The task UUID returned by post_document. Omit to list recent tasks.
+
+```typescript
+get_task({ task_id: "a1b2c3d4-...." })
+// Returns status (PENDING/STARTED/SUCCESS/FAILURE), result, and
+// related_document (the new document's ID on success).
 ```
 
 ### Tag Operations
@@ -231,7 +348,7 @@ Parameters:
 - name: Tag name
 - color (optional): Hex color code (e.g. "#ff0000")
 - match (optional): Text pattern to match
-- matching_algorithm (optional): One of "any", "all", "exact", "regular expression", "fuzzy"
+- matching_algorithm (optional): One of "none", "any", "all", "exact", "regular expression", "fuzzy", "auto". Mapped to the Paperless integer codes (none=0, any=1, all=2, exact=3, regular expression=4, fuzzy=5, auto=6) before sending. Default is "any".
 
 ```typescript
 create_tag({
@@ -257,7 +374,7 @@ Create a new correspondent.
 Parameters:
 - name: Correspondent name
 - match (optional): Text pattern to match
-- matching_algorithm (optional): One of "any", "all", "exact", "regular expression", "fuzzy"
+- matching_algorithm (optional): One of "none", "any", "all", "exact", "regular expression", "fuzzy", "auto" (mapped to Paperless integer codes before sending). Default is "any".
 
 ```typescript
 create_correspondent({
@@ -265,6 +382,27 @@ create_correspondent({
   match: "ACME",
   matching_algorithm: "fuzzy"
 })
+```
+
+#### update_correspondent
+Update an existing correspondent (PATCH — only the fields you pass change).
+
+Parameters:
+- id: Correspondent ID
+- name (optional), match (optional), matching_algorithm (optional), is_insensitive (optional), owner (optional)
+
+```typescript
+update_correspondent({ id: 2, name: "ACME Corporation" })
+```
+
+#### delete_correspondent
+Permanently delete a correspondent.
+
+Parameters:
+- id: Correspondent ID
+
+```typescript
+delete_correspondent({ id: 2 })
 ```
 
 ### Document Type Operations
@@ -282,13 +420,89 @@ Create a new document type.
 Parameters:
 - name: Document type name
 - match (optional): Text pattern to match
-- matching_algorithm (optional): One of "any", "all", "exact", "regular expression", "fuzzy"
+- matching_algorithm (optional): One of "none", "any", "all", "exact", "regular expression", "fuzzy", "auto" (mapped to Paperless integer codes before sending). Default is "any".
 
 ```typescript
 create_document_type({
   name: "Invoice",
   match: "invoice total amount due",
   matching_algorithm: "any"
+})
+```
+
+#### update_document_type
+Update an existing document type (PATCH — only the fields you pass change).
+
+Parameters:
+- id: Document type ID
+- name (optional), match (optional), matching_algorithm (optional), is_insensitive (optional), owner (optional)
+
+```typescript
+update_document_type({ id: 3, match: "invoice receipt bill" })
+```
+
+#### delete_document_type
+Permanently delete a document type.
+
+Parameters:
+- id: Document type ID
+
+```typescript
+delete_document_type({ id: 3 })
+```
+
+### Storage Path Operations
+
+#### list_storage_paths
+Get all storage paths. Use the IDs with post_document, update_document, or bulk_edit_documents (set_storage_path).
+
+```typescript
+list_storage_paths()
+```
+
+#### create_storage_path
+Create a new storage path (a path template controlling where document files are stored on disk).
+
+Parameters:
+- name: Unique name
+- path: Path template using placeholders, e.g. "{correspondent}/{created_year}/{title}"
+- match (optional): Text pattern for automatic assignment
+- matching_algorithm (optional): One of "none", "any", "all", "exact", "regular expression", "fuzzy", "auto"
+- is_insensitive (optional): Case-insensitive matching (default true)
+- owner (optional): User ID, or null
+
+```typescript
+create_storage_path({
+  name: "By correspondent and year",
+  path: "{correspondent}/{created_year}/{title}",
+  matching_algorithm: "any"
+})
+```
+
+### Custom Field Operations
+
+#### list_custom_fields
+Get all custom fields. Use the IDs with post_document, update_document, or bulk_edit_documents (modify_custom_fields).
+
+```typescript
+list_custom_fields()
+```
+
+#### create_custom_field
+Create a new custom field for storing typed metadata on documents.
+
+Parameters:
+- name: Unique field name
+- data_type: One of "string", "longtext", "url", "date", "boolean", "integer", "float", "monetary", "documentlink", "select"
+- select_options (optional): Required for data_type "select" — array of option labels (IDs assigned automatically)
+- default_currency (optional): For data_type "monetary" — 3-letter ISO code (e.g. "USD")
+- extra_data (optional): Raw extra_data escape hatch (rarely needed)
+
+```typescript
+create_custom_field({
+  name: "Priority",
+  data_type: "select",
+  select_options: ["Low", "Medium", "High"]
 })
 ```
 

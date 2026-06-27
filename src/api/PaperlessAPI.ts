@@ -7,11 +7,26 @@ export class PaperlessAPI {
     this.token = token;
   }
 
+  // Pinned Paperless-NGX REST API version, sent via the Accept header.
+  //
+  // The API is versioned through `Accept: application/json; version=N`. We pin
+  // to 7 rather than the previous 5 because:
+  //   - v7 introduced the current custom-field "select" format (options became
+  //     objects with stable ids instead of bare strings); the custom-field
+  //     tools in this server assume that shape.
+  //   - Everything used by the pre-existing tools is stable across 5→7 (hex
+  //     `color` on tags, FTS query params, download params, bulk_edit
+  //     contracts), so the bump is backwards compatible for them.
+  // The server changelog currently advertises up to v9; we pin to the lowest
+  // version that supports every feature here so older Paperless instances that
+  // don't yet speak v8/v9 still work.
+  private static readonly API_VERSION = 7;
+
   async request(path: string, options: RequestInit = {}) {
     const url = `${this.baseUrl}/api${path}`;
     const headers = {
       Authorization: `Token ${this.token}`,
-      Accept: "application/json; version=5",
+      Accept: `application/json; version=${PaperlessAPI.API_VERSION}`,
       "Content-Type": "application/json",
       "Accept-Language": "en-US,en;q=0.9",
     };
@@ -45,7 +60,12 @@ export class PaperlessAPI {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    return response.json();
+    // DELETE and some actions return 204 No Content (or an otherwise empty
+    // body); calling response.json() on those throws a SyntaxError. Read the
+    // body as text once and only parse when there's something to parse.
+    if (response.status === 204) return null;
+    const text = await response.text();
+    return text ? JSON.parse(text) : null;
   }
 
   // Document operations
@@ -62,7 +82,7 @@ export class PaperlessAPI {
 
   async postDocument(
     file: File,
-    metadata: Record<string, string | string[]> = {}
+    metadata: Record<string, any> = {}
   ) {
     const formData = new FormData();
     formData.append("document", file);
@@ -85,9 +105,12 @@ export class PaperlessAPI {
       formData.append("archive_serial_number", metadata.archive_serial_number);
     }
     if (metadata.custom_fields) {
-      (metadata.custom_fields as string[]).forEach((field) =>
-        formData.append("custom_fields", field)
-      );
+      // PostDocumentSerializer.custom_fields is a JSONField. A multipart
+      // QueryDict only keeps the last value for a non-relational key, so
+      // appending each id as a separate field silently drops all but one.
+      // Send the whole value as a single JSON-encoded field instead. The
+      // serializer accepts a list of ids ([1,2]) or a {field_id: value} map.
+      formData.append("custom_fields", JSON.stringify(metadata.custom_fields));
     }
 
     const response = await fetch(
@@ -112,31 +135,55 @@ export class PaperlessAPI {
     return this.request(`/documents/${query}`);
   }
 
-  async getDocument(id) {
-    return this.request(`/documents/${id}/`);
+  async getDocument(id, fullPerms = false) {
+    const query = fullPerms ? "?full_perms=true" : "";
+    return this.request(`/documents/${id}/${query}`);
   }
 
-  async searchDocuments(query, page?, pageSize?) {
-    const params = new URLSearchParams();
-    params.set("query", query);
-    if (page) params.set("page", page.toString());
-    if (pageSize) params.set("page_size", pageSize.toString());
-    
-    const response: any = await this.request(`/documents/?${params.toString()}`);
-    
-    // Filter out content field and long URLs to reduce token usage
-    if (response.results) {
+  // Strip the bulky/duplicative fields (full OCR content, long URLs) from a
+  // documents list response so results don't blow the context window. Shared
+  // by every list path that returns whole documents.
+  private stripDocumentListResponse(response: any) {
+    if (response && response.results) {
       response.results = response.results.map((doc: any) => {
         const { content, download_url, thumbnail_url, ...rest } = doc;
-        return {
-          ...rest,
-          // Include only document ID for constructing URLs if needed
-          id: doc.id,
-        };
+        return { ...rest, id: doc.id };
       });
     }
-    
     return response;
+  }
+
+  async searchDocuments(
+    query?: string,
+    page?: number,
+    pageSize?: number,
+    customFieldQuery?: string,
+    fullPerms = false
+  ) {
+    const params = new URLSearchParams();
+    // Both query and custom_field_query are optional individually; the documents
+    // endpoint accepts either or both. An empty query string is omitted so we
+    // don't send a meaningless empty full-text search.
+    if (query) params.set("query", query);
+    if (customFieldQuery) params.set("custom_field_query", customFieldQuery);
+    if (page) params.set("page", page.toString());
+    if (pageSize) params.set("page_size", pageSize.toString());
+    if (fullPerms) params.set("full_perms", "true");
+
+    const response: any = await this.request(`/documents/?${params.toString()}`);
+    return this.stripDocumentListResponse(response);
+  }
+
+  // Find documents similar to a given document using the search backend's
+  // "more like this" feature (/api/documents/?more_like_id=<id>).
+  async getSimilarDocuments(id: number, page?: number, pageSize?: number) {
+    const params = new URLSearchParams();
+    params.set("more_like_id", id.toString());
+    if (page) params.set("page", page.toString());
+    if (pageSize) params.set("page_size", pageSize.toString());
+
+    const response: any = await this.request(`/documents/?${params.toString()}`);
+    return this.stripDocumentListResponse(response);
   }
 
   async downloadDocument(id, asOriginal = false) {
@@ -156,8 +203,8 @@ export class PaperlessAPI {
   }
 
   // Tag operations
-  async getTags() {
-    return this.request("/tags/");
+  async getTags(fullPerms = false) {
+    return this.request(`/tags/${fullPerms ? "?full_perms=true" : ""}`);
   }
 
   async createTag(data) {
@@ -181,8 +228,10 @@ export class PaperlessAPI {
   }
 
   // Correspondent operations
-  async getCorrespondents() {
-    return this.request("/correspondents/");
+  async getCorrespondents(fullPerms = false) {
+    return this.request(
+      `/correspondents/${fullPerms ? "?full_perms=true" : ""}`
+    );
   }
 
   async createCorrespondent(data) {
@@ -192,13 +241,112 @@ export class PaperlessAPI {
     });
   }
 
+  async updateCorrespondent(id, data) {
+    return this.request(`/correspondents/${id}/`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteCorrespondent(id) {
+    return this.request(`/correspondents/${id}/`, {
+      method: "DELETE",
+    });
+  }
+
   // Document type operations
-  async getDocumentTypes() {
-    return this.request("/document_types/");
+  async getDocumentTypes(fullPerms = false) {
+    return this.request(
+      `/document_types/${fullPerms ? "?full_perms=true" : ""}`
+    );
   }
 
   async createDocumentType(data) {
     return this.request("/document_types/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateDocumentType(id, data) {
+    return this.request(`/document_types/${id}/`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteDocumentType(id) {
+    return this.request(`/document_types/${id}/`, {
+      method: "DELETE",
+    });
+  }
+
+  // Search autocomplete
+  async getAutocomplete(term: string, limit?: number) {
+    const params = new URLSearchParams();
+    params.set("term", term);
+    if (limit) params.set("limit", limit.toString());
+    return this.request(`/search/autocomplete/?${params.toString()}`);
+  }
+
+  // Single-document update/delete
+  async updateDocument(id, data) {
+    return this.request(`/documents/${id}/`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteDocument(id) {
+    return this.request(`/documents/${id}/`, {
+      method: "DELETE",
+    });
+  }
+
+  // Document notes (the `notes` field is read-only on the document serializer;
+  // notes are managed through this dedicated sub-resource).
+  async addDocumentNote(id, note: string) {
+    return this.request(`/documents/${id}/notes/`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    });
+  }
+
+  async deleteDocumentNote(id, noteId) {
+    return this.request(`/documents/${id}/notes/?id=${noteId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // Task operations
+  async getTasks(taskId?: string) {
+    const query = taskId
+      ? `?task_id=${encodeURIComponent(taskId)}`
+      : "";
+    return this.request(`/tasks/${query}`);
+  }
+
+  // Storage path operations
+  async getStoragePaths(fullPerms = false) {
+    return this.request(
+      `/storage_paths/${fullPerms ? "?full_perms=true" : ""}`
+    );
+  }
+
+  async createStoragePath(data) {
+    return this.request("/storage_paths/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Custom field operations
+  async getCustomFields() {
+    return this.request("/custom_fields/");
+  }
+
+  async createCustomField(data) {
+    return this.request("/custom_fields/", {
       method: "POST",
       body: JSON.stringify(data),
     });
