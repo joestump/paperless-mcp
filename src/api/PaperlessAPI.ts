@@ -135,8 +135,9 @@ export class PaperlessAPI {
     return this.request(`/documents/${query}`);
   }
 
-  async getDocument(id) {
-    return this.request(`/documents/${id}/`);
+  async getDocument(id, fullPerms = false) {
+    const query = fullPerms ? "?full_perms=true" : "";
+    return this.request(`/documents/${id}/${query}`);
   }
 
   // Strip the bulky/duplicative fields (full OCR content, long URLs) from a
@@ -156,7 +157,8 @@ export class PaperlessAPI {
     query?: string,
     page?: number,
     pageSize?: number,
-    customFieldQuery?: string
+    customFieldQuery?: string,
+    fullPerms = false
   ) {
     const params = new URLSearchParams();
     // Both query and custom_field_query are optional individually; the documents
@@ -166,6 +168,7 @@ export class PaperlessAPI {
     if (customFieldQuery) params.set("custom_field_query", customFieldQuery);
     if (page) params.set("page", page.toString());
     if (pageSize) params.set("page_size", pageSize.toString());
+    if (fullPerms) params.set("full_perms", "true");
 
     const response: any = await this.request(`/documents/?${params.toString()}`);
     return this.stripDocumentListResponse(response);
@@ -200,8 +203,8 @@ export class PaperlessAPI {
   }
 
   // Tag operations
-  async getTags() {
-    return this.request("/tags/");
+  async getTags(fullPerms = false) {
+    return this.request(`/tags/${fullPerms ? "?full_perms=true" : ""}`);
   }
 
   async createTag(data) {
@@ -225,8 +228,10 @@ export class PaperlessAPI {
   }
 
   // Correspondent operations
-  async getCorrespondents() {
-    return this.request("/correspondents/");
+  async getCorrespondents(fullPerms = false) {
+    return this.request(
+      `/correspondents/${fullPerms ? "?full_perms=true" : ""}`
+    );
   }
 
   async createCorrespondent(data) {
@@ -236,9 +241,24 @@ export class PaperlessAPI {
     });
   }
 
+  async updateCorrespondent(id, data) {
+    return this.request(`/correspondents/${id}/`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteCorrespondent(id) {
+    return this.request(`/correspondents/${id}/`, {
+      method: "DELETE",
+    });
+  }
+
   // Document type operations
-  async getDocumentTypes() {
-    return this.request("/document_types/");
+  async getDocumentTypes(fullPerms = false) {
+    return this.request(
+      `/document_types/${fullPerms ? "?full_perms=true" : ""}`
+    );
   }
 
   async createDocumentType(data) {
@@ -246,6 +266,27 @@ export class PaperlessAPI {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  async updateDocumentType(id, data) {
+    return this.request(`/document_types/${id}/`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteDocumentType(id) {
+    return this.request(`/document_types/${id}/`, {
+      method: "DELETE",
+    });
+  }
+
+  // Search autocomplete
+  async getAutocomplete(term: string, limit?: number) {
+    const params = new URLSearchParams();
+    params.set("term", term);
+    if (limit) params.set("limit", limit.toString());
+    return this.request(`/search/autocomplete/?${params.toString()}`);
   }
 
   // Single-document update/delete
@@ -286,8 +327,10 @@ export class PaperlessAPI {
   }
 
   // Storage path operations
-  async getStoragePaths() {
-    return this.request("/storage_paths/");
+  async getStoragePaths(fullPerms = false) {
+    return this.request(
+      `/storage_paths/${fullPerms ? "?full_perms=true" : ""}`
+    );
   }
 
   async createStoragePath(data) {
