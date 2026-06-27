@@ -144,7 +144,7 @@ Parameters:
   - permissions: Object for set_permissions with owner, permissions, merge flag
   - metadata_document_id: ID for merge to specify metadata source
   - delete_originals: Boolean for merge/split
-  - pages: String for split "[1,2-3,4,5-7]" or delete_pages "[2,3,4]"
+  - pages: Page spec (1-indexed). For split: comma-separated split points with ranges, e.g. "1,3,5-7" → three docs [1],[3],[5,6,7]. For delete_pages: comma-separated individual page numbers, e.g. "2,3,4" (ranges not allowed). Required for both methods.
   - degrees: Number for rotate (90, 180, or 270)
 
 Examples:
@@ -231,7 +231,7 @@ Parameters:
 - name: Tag name
 - color (optional): Hex color code (e.g. "#ff0000")
 - match (optional): Text pattern to match
-- matching_algorithm (optional): One of "any", "all", "exact", "regular expression", "fuzzy"
+- matching_algorithm (optional): One of "none", "any", "all", "exact", "regular expression", "fuzzy", "auto". Mapped to the Paperless integer codes (none=0, any=1, all=2, exact=3, regular expression=4, fuzzy=5, auto=6) before sending. Default is "any".
 
 ```typescript
 create_tag({
@@ -257,7 +257,7 @@ Create a new correspondent.
 Parameters:
 - name: Correspondent name
 - match (optional): Text pattern to match
-- matching_algorithm (optional): One of "any", "all", "exact", "regular expression", "fuzzy"
+- matching_algorithm (optional): One of "none", "any", "all", "exact", "regular expression", "fuzzy", "auto" (mapped to Paperless integer codes before sending). Default is "any".
 
 ```typescript
 create_correspondent({
@@ -282,7 +282,7 @@ Create a new document type.
 Parameters:
 - name: Document type name
 - match (optional): Text pattern to match
-- matching_algorithm (optional): One of "any", "all", "exact", "regular expression", "fuzzy"
+- matching_algorithm (optional): One of "none", "any", "all", "exact", "regular expression", "fuzzy", "auto" (mapped to Paperless integer codes before sending). Default is "any".
 
 ```typescript
 create_document_type({

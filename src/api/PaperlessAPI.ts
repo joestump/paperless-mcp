@@ -7,11 +7,26 @@ export class PaperlessAPI {
     this.token = token;
   }
 
+  // Pinned Paperless-NGX REST API version, sent via the Accept header.
+  //
+  // The API is versioned through `Accept: application/json; version=N`. We pin
+  // to 7 rather than the previous 5 because:
+  //   - v7 introduced the current custom-field "select" format (options became
+  //     objects with stable ids instead of bare strings); the custom-field
+  //     tools in this server assume that shape.
+  //   - Everything used by the pre-existing tools is stable across 5→7 (hex
+  //     `color` on tags, FTS query params, download params, bulk_edit
+  //     contracts), so the bump is backwards compatible for them.
+  // The server changelog currently advertises up to v9; we pin to the lowest
+  // version that supports every feature here so older Paperless instances that
+  // don't yet speak v8/v9 still work.
+  private static readonly API_VERSION = 7;
+
   async request(path: string, options: RequestInit = {}) {
     const url = `${this.baseUrl}/api${path}`;
     const headers = {
       Authorization: `Token ${this.token}`,
-      Accept: "application/json; version=5",
+      Accept: `application/json; version=${PaperlessAPI.API_VERSION}`,
       "Content-Type": "application/json",
       "Accept-Language": "en-US,en;q=0.9",
     };
