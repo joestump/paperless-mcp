@@ -1,5 +1,38 @@
 import { z } from "zod";
 
+// Extract a filename from a Content-Disposition header, handling RFC 5987
+// `filename*=charset''value` (preferred when present), quoted filenames, and
+// bare `filename=` values with trailing parameters.
+function parseContentDispositionFilename(
+  header: string | null | undefined,
+  fallback: string
+): string {
+  if (!header) return fallback;
+
+  // RFC 5987 extended form, e.g. filename*=UTF-8''my%20file.pdf
+  const ext = header.match(/filename\*=([^;]+)/i);
+  if (ext) {
+    let value = ext[1].trim();
+    const charsetMatch = value.match(/^[^']*''(.*)$/); // strip charset'lang'
+    if (charsetMatch) value = charsetMatch[1];
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  }
+
+  // Quoted form, e.g. filename="my file.pdf"
+  const quoted = header.match(/filename="([^"]*)"/i);
+  if (quoted) return quoted[1];
+
+  // Bare form, e.g. filename=my-file.pdf; other=...
+  const bare = header.match(/filename=([^;]+)/i);
+  if (bare) return bare[1].trim();
+
+  return fallback;
+}
+
 export function registerDocumentTools(server, api) {
   server.tool(
     "bulk_edit_documents",
@@ -52,7 +85,16 @@ export function registerDocumentTools(server, api) {
     },
     async (args, extra) => {
       if (!api) throw new Error("Please configure API connection first");
-      const { documents, method, ...parameters } = args;
+      const { documents, method, ...rest } = args;
+      let parameters: Record<string, any> = rest;
+      // The Paperless bulk_edit API expects set_permissions parameters
+      // (set_permissions/owner/merge) flattened at the top level of
+      // `parameters`, matching the bulk_edit_objects contract — not nested
+      // under a `permissions` wrapper.
+      if (method === "set_permissions" && rest.permissions) {
+        const { permissions, ...others } = rest;
+        parameters = { ...others, ...permissions };
+      }
       return api.bulkEditDocuments(documents, method, parameters);
     }
   );
@@ -121,11 +163,10 @@ export function registerDocumentTools(server, api) {
       const response = await api.downloadDocument(args.id, args.original);
       return {
         blob: Buffer.from(await response.arrayBuffer()).toString("base64"),
-        filename:
-          response.headers
-            .get("content-disposition")
-            ?.split("filename=")[1]
-            ?.replace(/"/g, "") || `document-${args.id}`,
+        filename: parseContentDispositionFilename(
+          response.headers.get("content-disposition"),
+          `document-${args.id}`
+        ),
       };
     }
   );
