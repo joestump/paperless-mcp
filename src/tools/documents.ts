@@ -33,6 +33,24 @@ function parseContentDispositionFilename(
   return fallback;
 }
 
+// Expand a "1,3,5-7" page specification into a flat list of integers, e.g.
+// [1, 3, 5, 6, 7]. Used to satisfy the bulk_edit delete_pages contract, which
+// requires a list of integers rather than a range string.
+function expandPageSpec(spec: string): number[] {
+  return spec
+    .split(",")
+    .flatMap((part) => {
+      const seg = part.trim();
+      if (seg.includes("-")) {
+        const [start, end] = seg.split("-").map((n) => parseInt(n.trim(), 10));
+        if (Number.isNaN(start) || Number.isNaN(end)) return [];
+        return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+      }
+      const n = parseInt(seg, 10);
+      return Number.isNaN(n) ? [] : [n];
+    });
+}
+
 export function registerDocumentTools(server, api) {
   server.tool(
     "bulk_edit_documents",
@@ -94,6 +112,13 @@ export function registerDocumentTools(server, api) {
       if (method === "set_permissions" && rest.permissions) {
         const { permissions, ...others } = rest;
         parameters = { ...others, ...permissions };
+      }
+      // delete_pages expects `pages` as a list of integers, whereas split
+      // expects the raw "1,3,5-7" string. Expand the string form here so the
+      // single user-facing `pages` argument satisfies the delete_pages
+      // contract; split's string is passed through untouched.
+      if (method === "delete_pages" && typeof parameters.pages === "string") {
+        parameters = { ...parameters, pages: expandPageSpec(parameters.pages) };
       }
       return api.bulkEditDocuments(documents, method, parameters);
     }
