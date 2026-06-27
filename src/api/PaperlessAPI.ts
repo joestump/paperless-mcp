@@ -60,7 +60,12 @@ export class PaperlessAPI {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    return response.json();
+    // DELETE and some actions return 204 No Content (or an otherwise empty
+    // body); calling response.json() on those throws a SyntaxError. Read the
+    // body as text once and only parse when there's something to parse.
+    if (response.status === 204) return null;
+    const text = await response.text();
+    return text ? JSON.parse(text) : null;
   }
 
   // Document operations
@@ -77,7 +82,7 @@ export class PaperlessAPI {
 
   async postDocument(
     file: File,
-    metadata: Record<string, string | string[]> = {}
+    metadata: Record<string, any> = {}
   ) {
     const formData = new FormData();
     formData.append("document", file);
@@ -100,9 +105,12 @@ export class PaperlessAPI {
       formData.append("archive_serial_number", metadata.archive_serial_number);
     }
     if (metadata.custom_fields) {
-      (metadata.custom_fields as string[]).forEach((field) =>
-        formData.append("custom_fields", field)
-      );
+      // PostDocumentSerializer.custom_fields is a JSONField. A multipart
+      // QueryDict only keeps the last value for a non-relational key, so
+      // appending each id as a separate field silently drops all but one.
+      // Send the whole value as a single JSON-encoded field instead. The
+      // serializer accepts a list of ids ([1,2]) or a {field_id: value} map.
+      formData.append("custom_fields", JSON.stringify(metadata.custom_fields));
     }
 
     const response = await fetch(
@@ -214,6 +222,67 @@ export class PaperlessAPI {
 
   async createDocumentType(data) {
     return this.request("/document_types/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Single-document update/delete
+  async updateDocument(id, data) {
+    return this.request(`/documents/${id}/`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteDocument(id) {
+    return this.request(`/documents/${id}/`, {
+      method: "DELETE",
+    });
+  }
+
+  // Document notes (the `notes` field is read-only on the document serializer;
+  // notes are managed through this dedicated sub-resource).
+  async addDocumentNote(id, note: string) {
+    return this.request(`/documents/${id}/notes/`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    });
+  }
+
+  async deleteDocumentNote(id, noteId) {
+    return this.request(`/documents/${id}/notes/?id=${noteId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // Task operations
+  async getTasks(taskId?: string) {
+    const query = taskId
+      ? `?task_id=${encodeURIComponent(taskId)}`
+      : "";
+    return this.request(`/tasks/${query}`);
+  }
+
+  // Storage path operations
+  async getStoragePaths() {
+    return this.request("/storage_paths/");
+  }
+
+  async createStoragePath(data) {
+    return this.request("/storage_paths/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Custom field operations
+  async getCustomFields() {
+    return this.request("/custom_fields/");
+  }
+
+  async createCustomField(data) {
+    return this.request("/custom_fields/", {
       method: "POST",
       body: JSON.stringify(data),
     });
