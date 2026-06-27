@@ -104,5 +104,9 @@
     /* Completeness */
     // "skipDefaultLibCheck": true,                      /* Skip type checking .d.ts files that are included with TypeScript. */
     "skipLibCheck": true /* Skip type checking all .d.ts files. */
-  }
+  },
+  /* Only the server source is compiled/type-checked by tsc. Tests live in
+     test/ and are run (and transpiled) by vitest, so they must not be emitted
+     into build/ nor block the production type-check. */
+  "include": ["src"]
 }
