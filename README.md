@@ -82,12 +82,15 @@ Get a specific document by ID.
 
 Parameters:
 - id: Document ID
+- full_perms (optional): When true, include the document's object-level permissions (owner plus per-user/per-group view/change permissions)
 
 ```typescript
 get_document({
   id: 123
 })
 ```
+
+> Note: `full_perms` is also accepted by `search_documents`, `list_tags`, `list_correspondents`, `list_document_types`, and `list_storage_paths` to include object permissions in their results.
 
 #### search_documents
 Full-text search across documents and/or structured filtering by custom-field values.
@@ -129,12 +132,24 @@ Parameters:
 find_similar_documents({ id: 123 })
 ```
 
+#### autocomplete_search
+Get search-term autocomplete suggestions from the full-text index.
+
+Parameters:
+- term: Partial search term to complete
+- limit (optional): Max suggestions (server default 10)
+
+```typescript
+autocomplete_search({ term: "inv" })
+```
+
 #### download_document
-Download a document file by ID.
+Download a document file by ID, returned as base64. The file is returned inline, so large files are rejected unless you raise `max_bytes` (to avoid overflowing the context window).
 
 Parameters:
 - id: Document ID
 - original (optional): If true, downloads original file instead of archived version
+- max_bytes (optional): Maximum file size to return in bytes (default 10 MB). Larger downloads error out instead of returning a giant blob.
 
 ```typescript
 download_document({
@@ -369,6 +384,27 @@ create_correspondent({
 })
 ```
 
+#### update_correspondent
+Update an existing correspondent (PATCH — only the fields you pass change).
+
+Parameters:
+- id: Correspondent ID
+- name (optional), match (optional), matching_algorithm (optional), is_insensitive (optional), owner (optional)
+
+```typescript
+update_correspondent({ id: 2, name: "ACME Corporation" })
+```
+
+#### delete_correspondent
+Permanently delete a correspondent.
+
+Parameters:
+- id: Correspondent ID
+
+```typescript
+delete_correspondent({ id: 2 })
+```
+
 ### Document Type Operations
 
 #### list_document_types
@@ -392,6 +428,27 @@ create_document_type({
   match: "invoice total amount due",
   matching_algorithm: "any"
 })
+```
+
+#### update_document_type
+Update an existing document type (PATCH — only the fields you pass change).
+
+Parameters:
+- id: Document type ID
+- name (optional), match (optional), matching_algorithm (optional), is_insensitive (optional), owner (optional)
+
+```typescript
+update_document_type({ id: 3, match: "invoice receipt bill" })
+```
+
+#### delete_document_type
+Permanently delete a document type.
+
+Parameters:
+- id: Document type ID
+
+```typescript
+delete_document_type({ id: 3 })
 ```
 
 ### Storage Path Operations

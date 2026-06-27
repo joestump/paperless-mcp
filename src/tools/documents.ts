@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+// Default cap for download_document. A base64 payload is ~33% larger than the
+// raw bytes and is returned inline, so an unbounded download can easily blow
+// the model's context window. 10 MB is a pragmatic ceiling callers can raise.
+const DEFAULT_MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024;
+
 // Extract a filename from a Content-Disposition header, handling RFC 5987
 // `filename*=charset''value` (preferred when present), quoted filenames, and
 // bare `filename=` values with trailing parameters.
@@ -198,10 +203,11 @@ export function registerDocumentTools(server, api) {
     "Get complete details for a specific document including full metadata, content preview, tags, correspondent, and document type information.",
     {
       id: z.number().describe("Unique document ID. Get this from search_documents results. Returns full document metadata, content preview, and associated tags/correspondent/type."),
+      full_perms: z.boolean().optional().describe("When true, include the document's object-level permissions (owner plus per-user/per-group view and change permissions) in the response."),
     },
     async (args, extra) => {
       if (!api) throw new Error("Please configure API connection first");
-      return api.getDocument(args.id);
+      return api.getDocument(args.id, args.full_perms);
     }
   );
 
@@ -218,6 +224,7 @@ export function registerDocumentTools(server, api) {
         ),
       page: z.number().optional().describe("Page number for pagination (starts at 1). Use to browse through large result sets without hitting token limits."),
       page_size: z.number().optional().describe("Number of documents per page (default 25, max 100). Smaller page sizes help avoid token limits when many documents match."),
+      full_perms: z.boolean().optional().describe("When true, include each result's object-level permissions (owner plus per-user/per-group view and change permissions)."),
     },
     async (args, extra) => {
       if (!api) throw new Error("Please configure API connection first");
@@ -236,8 +243,22 @@ export function registerDocumentTools(server, api) {
         args.query,
         args.page,
         args.page_size,
-        customFieldQuery
+        customFieldQuery,
+        args.full_perms
       );
+    }
+  );
+
+  server.tool(
+    "autocomplete_search",
+    "Get search term autocomplete suggestions from the Paperless-NGX full-text index. Given a partial term, returns a list of completed terms that appear in the indexed documents — useful for building or refining a search_documents query.",
+    {
+      term: z.string().describe("The partial search term to complete (e.g. 'inv' might suggest 'invoice', 'investment')."),
+      limit: z.number().int().positive().optional().describe("Maximum number of suggestions to return. Defaults to 10 on the server."),
+    },
+    async (args, extra) => {
+      if (!api) throw new Error("Please configure API connection first");
+      return api.getAutocomplete(args.term, args.limit);
     }
   );
 
@@ -257,16 +278,36 @@ export function registerDocumentTools(server, api) {
 
   server.tool(
     "download_document",
-    "Download a document file as base64-encoded data. Choose between original uploaded file or processed/archived version with OCR improvements.",
+    "Download a document file as base64-encoded data. Choose between original uploaded file or processed/archived version with OCR improvements. NOTE: the file is returned inline as base64, which consumes context proportional to file size; large files are rejected unless you raise max_bytes. For big files, prefer fetching from the Paperless UI/API directly.",
     {
       id: z.number().describe("Document ID to download. Get this from search_documents or get_document results."),
       original: z.boolean().optional().describe("Whether to download the original uploaded file (true) or the processed/archived version (false, default). Original files preserve exact formatting but may not include OCR improvements."),
+      max_bytes: z.number().int().positive().optional().describe(`Maximum file size to return, in bytes. Defaults to ${DEFAULT_MAX_DOWNLOAD_BYTES} (${Math.round(DEFAULT_MAX_DOWNLOAD_BYTES / (1024 * 1024))} MB). Downloads larger than this are rejected with an error instead of returning a giant base64 blob that could overflow the context window. Raise this only if you really need the bytes inline.`),
     },
     async (args, extra) => {
       if (!api) throw new Error("Please configure API connection first");
+      const limit = args.max_bytes ?? DEFAULT_MAX_DOWNLOAD_BYTES;
       const response = await api.downloadDocument(args.id, args.original);
+
+      // Fast path: reject before buffering the whole body when the server tells
+      // us the size up front.
+      const declared = Number(response.headers.get("content-length"));
+      if (Number.isFinite(declared) && declared > limit) {
+        throw new Error(
+          `Document ${args.id} is ${declared} bytes, which exceeds the ${limit}-byte limit for inline download. Raise max_bytes to fetch it anyway, or download it directly from Paperless.`
+        );
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      // Safety net for servers that omit content-length (e.g. chunked).
+      if (buffer.length > limit) {
+        throw new Error(
+          `Document ${args.id} is ${buffer.length} bytes, which exceeds the ${limit}-byte limit for inline download. Raise max_bytes to fetch it anyway, or download it directly from Paperless.`
+        );
+      }
+
       return {
-        blob: Buffer.from(await response.arrayBuffer()).toString("base64"),
+        blob: buffer.toString("base64"),
         filename: parseContentDispositionFilename(
           response.headers.get("content-disposition"),
           `document-${args.id}`
