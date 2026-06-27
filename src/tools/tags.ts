@@ -21,7 +21,7 @@ export function registerTagTools(server, api) {
         .regex(/^#[0-9A-Fa-f]{6}$/)
         .optional().describe("Hex color code for visual identification (e.g., '#FF0000' for red, '#00FF00' for green). If not provided, Paperless assigns a random color."),
       match: z.string().optional().describe("Text pattern to automatically assign this tag to matching documents. Use keywords, phrases, or regular expressions depending on matching_algorithm."),
-      matching_algorithm: z.number().int().min(0).max(4).optional().describe("How to match text patterns: 0=any word, 1=all words, 2=exact phrase, 3=regular expression, 4=fuzzy matching. Default is 0 (any word)."),
+      matching_algorithm: z.number().int().min(0).max(6).optional().describe("How to match text patterns (Paperless-ngx integer codes): 0=none (no auto-matching), 1=any word, 2=all words, 3=exact match, 4=regular expression, 5=fuzzy match, 6=automatic. Default is 1 (any word)."),
     },
     async (args, extra) => {
       if (!api) throw new Error("Please configure API connection first");
@@ -40,7 +40,7 @@ export function registerTagTools(server, api) {
         .regex(/^#[0-9A-Fa-f]{6}$/)
         .optional().describe("New hex color code for visual identification (e.g., '#FF0000' for red). Leave empty to keep current color."),
       match: z.string().optional().describe("Text pattern for automatic tag assignment. Empty string removes auto-matching. Use keywords, phrases, or regex depending on matching_algorithm."),
-      matching_algorithm: z.number().int().min(0).max(4).optional().describe("Algorithm for pattern matching: 0=any word, 1=all words, 2=exact phrase, 3=regular expression, 4=fuzzy matching."),
+      matching_algorithm: z.number().int().min(0).max(6).optional().describe("Algorithm for pattern matching (Paperless-ngx integer codes): 0=none (no auto-matching), 1=any word, 2=all words, 3=exact match, 4=regular expression, 5=fuzzy match, 6=automatic."),
     },
     async (args, extra) => {
       if (!api) throw new Error("Please configure API connection first");
