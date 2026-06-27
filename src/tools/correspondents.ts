@@ -1,6 +1,18 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp";
 import { z } from "zod";
 
+// Paperless-ngx stores matching_algorithm as an integer (PositiveIntegerField
+// with choices on MatchingModel). The API rejects the human-readable strings,
+// so map the friendly enum to the integer codes before sending.
+// 0=none, 1=any, 2=all, 3=exact/literal, 4=regex, 5=fuzzy, 6=automatic.
+const MATCHING_ALGORITHMS: Record<string, number> = {
+  any: 1,
+  all: 2,
+  exact: 3,
+  "regular expression": 4,
+  fuzzy: 5,
+};
+
 export function registerCorrespondentTools(server: McpServer, api) {
   server.tool(
     "list_correspondents",
@@ -22,7 +34,12 @@ export function registerCorrespondentTools(server: McpServer, api) {
     },
     async (args, extra) => {
       if (!api) throw new Error("Please configure API connection first");
-      return api.createCorrespondent(args);
+      const { matching_algorithm, ...rest } = args;
+      const payload =
+        matching_algorithm !== undefined
+          ? { ...rest, matching_algorithm: MATCHING_ALGORITHMS[matching_algorithm] }
+          : rest;
+      return api.createCorrespondent(payload);
     }
   );
 
