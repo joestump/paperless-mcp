@@ -85,9 +85,11 @@ export class PaperlessAPI {
       formData.append("archive_serial_number", metadata.archive_serial_number);
     }
     if (metadata.custom_fields) {
-      (metadata.custom_fields as string[]).forEach((field) =>
-        formData.append("custom_fields", field)
-      );
+      // post_document's custom_fields is a JSONField expecting a single JSON
+      // value (a list of ids, or an id->value map). Repeated scalar form
+      // fields are read as a single scalar and silently dropped, so encode the
+      // whole value as one JSON field instead.
+      formData.append("custom_fields", JSON.stringify(metadata.custom_fields));
     }
 
     const response = await fetch(
