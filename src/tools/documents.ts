@@ -53,7 +53,8 @@ export function registerDocumentTools(server, api) {
         "split",
         "rotate",
         "delete_pages",
-      ]).describe("The bulk operation to perform: set_correspondent (assign sender/receiver), set_document_type (categorize documents), set_storage_path (organize file location), add_tag/remove_tag/modify_tags (manage labels), delete (permanently remove), reprocess (re-run OCR/indexing), set_permissions (control access), merge (combine documents), split (separate into multiple), rotate (adjust orientation), delete_pages (remove specific pages)"),
+        "modify_custom_fields",
+      ]).describe("The bulk operation to perform: set_correspondent (assign sender/receiver), set_document_type (categorize documents), set_storage_path (organize file location), add_tag/remove_tag/modify_tags (manage labels), delete (permanently remove), reprocess (re-run OCR/indexing), set_permissions (control access), merge (combine documents), split (separate into multiple), rotate (adjust orientation), delete_pages (remove specific pages), modify_custom_fields (add/remove custom field values)"),
       correspondent: z.number().optional().describe("ID of correspondent to assign when method is 'set_correspondent'. Use list_correspondents to get valid IDs."),
       document_type: z.number().optional().describe("ID of document type to assign when method is 'set_document_type'. Use list_document_types to get valid IDs."),
       storage_path: z.number().optional().describe("ID of storage path to assign when method is 'set_storage_path'. Storage paths organize documents in folder hierarchies."),
@@ -82,6 +83,17 @@ export function registerDocumentTools(server, api) {
       delete_originals: z.boolean().optional().describe("Whether to delete original documents after merge/split operations. Use with caution."),
       pages: z.string().optional().describe("Page specification (1-indexed). The accepted format depends on the method. For 'split': a comma-separated list of split points where ranges define each output document, e.g. '1,3,5-7' produces three documents containing [page 1], [page 3], [pages 5,6,7]. For 'delete_pages': a comma-separated list of individual page numbers to remove, e.g. '2,3,4' (ranges are NOT supported here and will be rejected). Required for both 'split' and 'delete_pages'."),
       degrees: z.number().optional().describe("Rotation angle in degrees when method is 'rotate'. Use 90, 180, or 270 for standard rotations."),
+      add_custom_fields: z
+        .union([
+          z.array(z.number()),
+          z.record(z.string(), z.any()),
+        ])
+        .optional()
+        .describe("Custom fields to add when method is 'modify_custom_fields'. Either an array of custom field IDs to attach with no value (e.g. [1,2]), or an object mapping custom field ID to the value to set (e.g. {\"3\": \"2024-01-01\", \"4\": 42}). Use list_custom_fields to get valid IDs."),
+      remove_custom_fields: z
+        .array(z.number())
+        .optional()
+        .describe("Array of custom field IDs to remove from the documents when method is 'modify_custom_fields'. Use list_custom_fields to get valid IDs."),
     },
     async (args, extra) => {
       if (!api) throw new Error("Please configure API connection first");
@@ -138,7 +150,13 @@ export function registerDocumentTools(server, api) {
       storage_path: z.number().optional().describe("ID of storage path to organize document location in folder hierarchy. Leave empty for default storage."),
       tags: z.array(z.number()).optional().describe("Array of tag IDs to label this document. Use list_tags to find existing tags or create_tag to add new ones."),
       archive_serial_number: z.string().optional().describe("Custom archive number for document organization and reference. Useful for maintaining external filing systems."),
-      custom_fields: z.array(z.number()).optional().describe("Array of custom field IDs to associate with this document. Custom fields store additional metadata."),
+      custom_fields: z
+        .union([
+          z.array(z.number()),
+          z.record(z.string(), z.any()),
+        ])
+        .optional()
+        .describe("Custom fields to associate with this document. Either an array of custom field IDs to attach with no value (e.g. [1,2]), or an object mapping custom field ID to its value (e.g. {\"3\": \"2024-01-01\", \"4\": 42}). Use list_custom_fields to get valid IDs and their data types."),
     },
     async (args, extra) => {
       if (!api) throw new Error("Please configure API connection first");
@@ -194,6 +212,76 @@ export function registerDocumentTools(server, api) {
           `document-${args.id}`
         ),
       };
+    }
+  );
+
+  server.tool(
+    "update_document",
+    "Update a single document's metadata: title, dates, correspondent, document type, storage path, tags, archive serial number, owner, and custom-field values. Optionally add a note. Only the fields you provide are changed (PATCH semantics). Use bulk_edit_documents for operations across many documents at once.",
+    {
+      id: z.number().describe("ID of the document to update. Get this from search_documents or get_document results."),
+      title: z.string().optional().describe("New document title."),
+      created: z.string().optional().describe("Document creation date in ISO format (YYYY-MM-DD or full datetime like '2024-01-19T06:15:00+02:00'). This is the date the document itself was created, not when it was added to Paperless."),
+      correspondent: z.number().nullable().optional().describe("ID of the correspondent to assign, or null to clear it. Use list_correspondents to get valid IDs."),
+      document_type: z.number().nullable().optional().describe("ID of the document type to assign, or null to clear it. Use list_document_types to get valid IDs."),
+      storage_path: z.number().nullable().optional().describe("ID of the storage path to assign, or null to clear it. Use list_storage_paths to get valid IDs."),
+      tags: z.array(z.number()).optional().describe("Complete array of tag IDs for the document. This REPLACES the document's existing tags (it is not additive). Use list_tags to get valid IDs, or bulk_edit_documents with add_tag/remove_tag to change tags incrementally."),
+      archive_serial_number: z.number().nullable().optional().describe("Archive serial number (an integer) for external filing reference, or null to clear it."),
+      owner: z.number().nullable().optional().describe("User ID to set as the document owner, or null to remove ownership."),
+      custom_fields: z
+        .array(
+          z.object({
+            field: z.number().describe("Custom field ID (from list_custom_fields)."),
+            value: z.any().describe("Value for the field, matching its data_type (string/number/boolean/date string/array of document IDs for documentlink/option id for select)."),
+          })
+        )
+        .optional()
+        .describe("Custom field values to set on the document. This REPLACES the document's existing custom field set with the array provided. Each entry is {field: <id>, value: <value>}."),
+      add_note: z.string().optional().describe("Text of a note to add to the document. Notes cannot be set through the regular fields; providing this appends a new note via the document's notes sub-resource. Other fields above are still applied in the same call."),
+    },
+    async (args, extra) => {
+      if (!api) throw new Error("Please configure API connection first");
+      const { id, add_note, ...fields } = args;
+
+      // Only send fields that were actually provided so PATCH doesn't clobber
+      // unrelated values. (undefined keys are dropped by JSON.stringify, but we
+      // filter explicitly to avoid sending an empty-but-present PATCH body and
+      // to know whether any document fields were supplied at all.)
+      const body: Record<string, any> = {};
+      for (const [key, value] of Object.entries(fields)) {
+        if (value !== undefined) body[key] = value;
+      }
+
+      let document: any = undefined;
+      if (Object.keys(body).length > 0) {
+        document = await api.updateDocument(id, body);
+      }
+
+      let note: any = undefined;
+      if (add_note !== undefined) {
+        note = await api.addDocumentNote(id, add_note);
+      }
+
+      if (document === undefined && note === undefined) {
+        throw new Error(
+          "update_document requires at least one field to change or an add_note value."
+        );
+      }
+
+      return { document, note };
+    }
+  );
+
+  server.tool(
+    "delete_document",
+    "Permanently delete a single document from Paperless-NGX. Depending on your instance settings this may move it to the trash or remove it outright. This cannot be undone from this tool. Use bulk_edit_documents with method 'delete' to remove many documents at once.",
+    {
+      id: z.number().describe("ID of the document to permanently delete. Get this from search_documents or get_document results. Use with caution."),
+    },
+    async (args, extra) => {
+      if (!api) throw new Error("Please configure API connection first");
+      await api.deleteDocument(args.id);
+      return { deleted: true, id: args.id };
     }
   );
 }
