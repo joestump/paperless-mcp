@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  matchingAlgorithmSchema,
+  resolveMatchingAlgorithm,
+} from "../utils/matching";
 
 export function registerDocumentTypeTools(server, api) {
   server.tool(
@@ -17,13 +21,14 @@ export function registerDocumentTypeTools(server, api) {
     {
       name: z.string().describe("Name of the document type for categorizing documents by their purpose or format. Examples: 'Invoice', 'Receipt', 'Contract', 'Letter', 'Bank Statement', 'Tax Document'."),
       match: z.string().optional().describe("Text pattern to automatically assign this document type to matching documents. Use keywords that commonly appear in this type of document (e.g., 'invoice', 'receipt', 'contract terms')."),
-      matching_algorithm: z
-        .enum(["any", "all", "exact", "regular expression", "fuzzy"])
-        .optional().describe("How to match text patterns: 'any'=any word matches, 'all'=all words must match, 'exact'=exact phrase match, 'regular expression'=use regex patterns, 'fuzzy'=approximate matching with typos. Default is 'any'."),
+      matching_algorithm: matchingAlgorithmSchema.optional(),
     },
     async (args, extra) => {
       if (!api) throw new Error("Please configure API connection first");
-      return api.createDocumentType(args);
+      return api.createDocumentType({
+        ...args,
+        matching_algorithm: resolveMatchingAlgorithm(args.matching_algorithm),
+      });
     }
   );
 
