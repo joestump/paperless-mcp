@@ -124,7 +124,8 @@ Edit your `claude_desktop_config.json`:
 
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-- Linux: `~/.config/Claude/claude_desktop_config.json`
+
+(Claude Desktop is macOS/Windows only. On Linux, use Claude Code — see below.)
 
 ```jsonc
 {
