@@ -64,16 +64,29 @@ Here are some things you can ask Claude to do:
 ### Document Operations
 
 #### list_documents
-Get a paginated list of all documents.
+List documents using structured metadata filters (not full-text search — use `search_documents` for that). Returns metadata without the OCR content field.
 
-Parameters:
-- page (optional): Page number
-- page_size (optional): Number of documents per page
+Parameters (all optional):
+- correspondent_id / document_type_id / storage_path_id: filter by related object ID
+- tags_all: documents having ALL of these tag IDs
+- tags_any: documents having ANY of these tag IDs
+- tags_none: exclude documents with any of these tag IDs
+- is_tagged: true = only tagged documents, false = only untagged
+- title_contains / content_contains: case-insensitive substring match
+- created_after / created_before: document date range (YYYY-MM-DD)
+- added_after / added_before: date-added range (YYYY-MM-DD)
+- archive_serial_number: exact ASN
+- ordering: e.g. "created", "-created", "title" ("-" = descending)
+- page / page_size: pagination
+- full_perms: include object-level permissions
 
 ```typescript
+// Untagged invoices from correspondent 2, newest first
 list_documents({
-  page: 1,
-  page_size: 25
+  correspondent_id: 2,
+  document_type_id: 5,
+  created_after: "2024-01-01",
+  ordering: "-created"
 })
 ```
 
@@ -318,6 +331,58 @@ Parameters:
 
 ```typescript
 delete_document({ id: 123 })
+```
+
+#### get_document_suggestions
+Get Paperless-NGX's automatic suggestions for a document (candidate correspondents, tags, document types, storage paths, and dates). Returns arrays of IDs you can apply with `update_document`.
+
+Parameters:
+- id: Document ID
+
+```typescript
+get_document_suggestions({ id: 123 })
+// → { correspondents: [2], tags: [5], document_types: [3], storage_paths: [], dates: ["2024-01-15"] }
+```
+
+#### get_document_notes
+List the notes attached to a document (id, text, created, author). Add notes via `update_document` (add_note); remove with `delete_document_note`.
+
+Parameters:
+- id: Document ID
+
+```typescript
+get_document_notes({ id: 123 })
+```
+
+#### delete_document_note
+Delete a single note from a document.
+
+Parameters:
+- id: Document ID
+- note_id: ID of the note (from get_document_notes)
+
+```typescript
+delete_document_note({ id: 123, note_id: 8 })
+```
+
+#### get_document_metadata
+Get low-level file metadata: checksums, file sizes, MIME type, media filenames, detected language, and parser-extracted metadata.
+
+Parameters:
+- id: Document ID
+
+```typescript
+get_document_metadata({ id: 123 })
+```
+
+#### get_document_history
+Get the audit trail for a document (chronological field changes, actor, timestamp). Requires audit logging enabled on the server.
+
+Parameters:
+- id: Document ID
+
+```typescript
+get_document_history({ id: 123 })
 ```
 
 #### get_task

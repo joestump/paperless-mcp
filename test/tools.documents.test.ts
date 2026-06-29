@@ -238,6 +238,91 @@ describe("download_document size guard", () => {
   });
 });
 
+describe("list_documents structured filtering", () => {
+  it("maps friendly args to Paperless filter query params", async () => {
+    const { tools, api } = docTools();
+    await tools.list_documents.handler({
+      correspondent_id: 2,
+      document_type_id: 3,
+      storage_path_id: 4,
+      tags_all: [1, 2],
+      tags_any: [5],
+      tags_none: [9],
+      is_tagged: true,
+      title_contains: "invoice",
+      content_contains: "total",
+      created_after: "2024-01-01",
+      created_before: "2024-12-31",
+      added_after: "2024-02-01",
+      added_before: "2024-11-30",
+      archive_serial_number: 42,
+      ordering: "-created",
+      page: 2,
+      page_size: 50,
+      full_perms: true,
+    });
+    expect(api.listDocuments).toHaveBeenCalledWith({
+      correspondent__id: 2,
+      document_type__id: 3,
+      storage_path__id: 4,
+      tags__id__all: [1, 2],
+      tags__id__in: [5],
+      tags__id__none: [9],
+      is_tagged: true,
+      title__icontains: "invoice",
+      content__icontains: "total",
+      created__date__gte: "2024-01-01",
+      created__date__lte: "2024-12-31",
+      added__date__gte: "2024-02-01",
+      added__date__lte: "2024-11-30",
+      archive_serial_number: 42,
+      ordering: "-created",
+      page: 2,
+      page_size: 50,
+      full_perms: true,
+    });
+  });
+
+  it("omits unspecified filters", async () => {
+    const { tools, api } = docTools();
+    await tools.list_documents.handler({ correspondent_id: 7 });
+    expect(api.listDocuments).toHaveBeenCalledWith({ correspondent__id: 7 });
+  });
+});
+
+describe("Tier 2 document detail tools", () => {
+  it("get_document_suggestions forwards the id", async () => {
+    const { tools, api } = docTools();
+    await tools.get_document_suggestions.handler({ id: 5 });
+    expect(api.getDocumentSuggestions).toHaveBeenCalledWith(5);
+  });
+
+  it("get_document_notes forwards the id", async () => {
+    const { tools, api } = docTools();
+    await tools.get_document_notes.handler({ id: 5 });
+    expect(api.getDocumentNotes).toHaveBeenCalledWith(5);
+  });
+
+  it("delete_document_note forwards id and note_id and reports deletion", async () => {
+    const { tools, api } = docTools();
+    const res = await tools.delete_document_note.handler({ id: 5, note_id: 8 });
+    expect(api.deleteDocumentNote).toHaveBeenCalledWith(5, 8);
+    expect(res).toEqual({ deleted: true, id: 5, note_id: 8 });
+  });
+
+  it("get_document_metadata forwards the id", async () => {
+    const { tools, api } = docTools();
+    await tools.get_document_metadata.handler({ id: 5 });
+    expect(api.getDocumentMetadata).toHaveBeenCalledWith(5);
+  });
+
+  it("get_document_history forwards the id", async () => {
+    const { tools, api } = docTools();
+    await tools.get_document_history.handler({ id: 5 });
+    expect(api.getDocumentHistory).toHaveBeenCalledWith(5);
+  });
+});
+
 describe("get_document and search helpers pass full_perms", () => {
   it("threads full_perms into get_document", async () => {
     const { tools, api } = docTools();

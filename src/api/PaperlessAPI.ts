@@ -140,6 +140,40 @@ export class PaperlessAPI {
     return this.request(`/documents/${id}/${query}`);
   }
 
+  // List documents with structured filtering (correspondent/type/tags/dates/
+  // ASN/ordering), as opposed to the full-text searchDocuments path. Each
+  // key in `params` is a Paperless filter query parameter; array values are
+  // sent comma-separated and undefined/null values are omitted.
+  async listDocuments(params: Record<string, any> = {}) {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value === undefined || value === null) continue;
+      search.set(key, Array.isArray(value) ? value.join(",") : String(value));
+    }
+    const qs = search.toString();
+    const response: any = await this.request(
+      `/documents/${qs ? `?${qs}` : ""}`
+    );
+    return this.stripDocumentListResponse(response);
+  }
+
+  // Document detail sub-resources.
+  async getDocumentSuggestions(id) {
+    return this.request(`/documents/${id}/suggestions/`);
+  }
+
+  async getDocumentMetadata(id) {
+    return this.request(`/documents/${id}/metadata/`);
+  }
+
+  async getDocumentHistory(id) {
+    return this.request(`/documents/${id}/history/`);
+  }
+
+  async getDocumentNotes(id) {
+    return this.request(`/documents/${id}/notes/`);
+  }
+
   // Strip the bulky/duplicative fields (full OCR content, long URLs) from a
   // documents list response so results don't blow the context window. Shared
   // by every list path that returns whole documents.
