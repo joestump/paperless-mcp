@@ -385,4 +385,123 @@ export function registerDocumentTools(server, api) {
       return { deleted: true, id: args.id };
     }
   );
+
+  server.tool(
+    "list_documents",
+    "List documents using structured metadata filters (correspondent, document type, storage path, tags, dates, archive serial number) rather than full-text search. Use this when you want documents matching exact criteria; use search_documents for free-text/content queries. Returns document metadata WITHOUT the full OCR content field to prevent token overflow.",
+    {
+      correspondent_id: z.number().optional().describe("Only documents with this correspondent ID. Use list_correspondents to find IDs."),
+      document_type_id: z.number().optional().describe("Only documents with this document type ID. Use list_document_types to find IDs."),
+      storage_path_id: z.number().optional().describe("Only documents with this storage path ID. Use list_storage_paths to find IDs."),
+      tags_all: z.array(z.number()).optional().describe("Only documents that have ALL of these tag IDs."),
+      tags_any: z.array(z.number()).optional().describe("Only documents that have ANY of these tag IDs."),
+      tags_none: z.array(z.number()).optional().describe("Exclude documents that have any of these tag IDs."),
+      is_tagged: z.boolean().optional().describe("true: only documents that have at least one tag; false: only untagged documents."),
+      title_contains: z.string().optional().describe("Only documents whose title contains this text (case-insensitive)."),
+      content_contains: z.string().optional().describe("Only documents whose OCR content contains this text (case-insensitive)."),
+      created_after: z.string().optional().describe("Only documents created on or after this date (YYYY-MM-DD). Refers to the document's own date."),
+      created_before: z.string().optional().describe("Only documents created on or before this date (YYYY-MM-DD)."),
+      added_after: z.string().optional().describe("Only documents added to Paperless on or after this date (YYYY-MM-DD)."),
+      added_before: z.string().optional().describe("Only documents added to Paperless on or before this date (YYYY-MM-DD)."),
+      archive_serial_number: z.number().optional().describe("Only the document with this exact archive serial number."),
+      ordering: z.string().optional().describe("Sort order, e.g. 'created', '-created' (descending), 'title', '-added', 'archive_serial_number'. Prefix with '-' for descending."),
+      page: z.number().optional().describe("Page number for pagination (starts at 1)."),
+      page_size: z.number().optional().describe("Number of documents per page (default 25, max 100)."),
+      full_perms: z.boolean().optional().describe("When true, include each document's object-level permissions."),
+    },
+    async (args, extra) => {
+      if (!api) throw new Error("Please configure API connection first");
+      // Map friendly argument names to the Paperless DocumentFilterSet query
+      // parameters. Only provided filters are forwarded.
+      const fieldMap: Record<string, string> = {
+        correspondent_id: "correspondent__id",
+        document_type_id: "document_type__id",
+        storage_path_id: "storage_path__id",
+        tags_all: "tags__id__all",
+        tags_any: "tags__id__in",
+        tags_none: "tags__id__none",
+        is_tagged: "is_tagged",
+        title_contains: "title__icontains",
+        content_contains: "content__icontains",
+        created_after: "created__date__gte",
+        created_before: "created__date__lte",
+        added_after: "added__date__gte",
+        added_before: "added__date__lte",
+        archive_serial_number: "archive_serial_number",
+        ordering: "ordering",
+        page: "page",
+        page_size: "page_size",
+      };
+      const params: Record<string, any> = {};
+      for (const [friendly, paperless] of Object.entries(fieldMap)) {
+        if ((args as any)[friendly] !== undefined) {
+          params[paperless] = (args as any)[friendly];
+        }
+      }
+      if (args.full_perms) params.full_perms = true;
+      return api.listDocuments(params);
+    }
+  );
+
+  server.tool(
+    "get_document_suggestions",
+    "Get Paperless-NGX's automatic suggestions for a document: candidate correspondents, tags, document types, storage paths, and dates inferred from its content and your matching rules. Returns arrays of IDs (and date strings) you can then apply with update_document or bulk_edit_documents.",
+    {
+      id: z.number().describe("Document ID to get suggestions for. Get this from search_documents or list_documents."),
+    },
+    async (args, extra) => {
+      if (!api) throw new Error("Please configure API connection first");
+      return api.getDocumentSuggestions(args.id);
+    }
+  );
+
+  server.tool(
+    "get_document_notes",
+    "List the notes attached to a document. Returns each note's id, text, creation time, and author. Use update_document (add_note) to add a note and delete_document_note to remove one.",
+    {
+      id: z.number().describe("Document ID whose notes to list."),
+    },
+    async (args, extra) => {
+      if (!api) throw new Error("Please configure API connection first");
+      return api.getDocumentNotes(args.id);
+    }
+  );
+
+  server.tool(
+    "delete_document_note",
+    "Delete a single note from a document by the note's ID. Use get_document_notes to find note IDs.",
+    {
+      id: z.number().describe("Document ID the note belongs to."),
+      note_id: z.number().describe("ID of the note to delete (from get_document_notes)."),
+    },
+    async (args, extra) => {
+      if (!api) throw new Error("Please configure API connection first");
+      await api.deleteDocumentNote(args.id, args.note_id);
+      return { deleted: true, id: args.id, note_id: args.note_id };
+    }
+  );
+
+  server.tool(
+    "get_document_metadata",
+    "Get low-level file metadata for a document: original/archive checksums, file sizes, MIME type, media filenames, detected language, and parser-extracted metadata. Useful for verifying file integrity or inspecting the stored files.",
+    {
+      id: z.number().describe("Document ID to inspect."),
+    },
+    async (args, extra) => {
+      if (!api) throw new Error("Please configure API connection first");
+      return api.getDocumentMetadata(args.id);
+    }
+  );
+
+  server.tool(
+    "get_document_history",
+    "Get the audit trail for a document: the chronological list of changes (field modifications, who made them, and when). Requires audit logging to be enabled on the Paperless-NGX server (otherwise the server returns an error).",
+    {
+      id: z.number().describe("Document ID whose change history to retrieve."),
+    },
+    async (args, extra) => {
+      if (!api) throw new Error("Please configure API connection first");
+      return api.getDocumentHistory(args.id);
+    }
+  );
 }

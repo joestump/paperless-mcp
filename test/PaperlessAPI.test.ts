@@ -99,6 +99,50 @@ describe("PaperlessAPI query construction", () => {
     await api.getSimilarDocuments(42);
     expect(url()).toContain("more_like_id=42");
   });
+
+  it("listDocuments serializes filters (arrays joined by comma) and strips no-value keys", async () => {
+    const url = captureUrl();
+    const api = new PaperlessAPI("http://x", "t");
+    await api.listDocuments({
+      correspondent__id: 2,
+      tags__id__all: [1, 2, 3],
+      title__icontains: "rent",
+      ordering: undefined,
+    });
+    const params = new URL(url()).searchParams;
+    expect(params.get("correspondent__id")).toBe("2");
+    expect(params.get("tags__id__all")).toBe("1,2,3");
+    expect(params.get("title__icontains")).toBe("rent");
+    expect(params.has("ordering")).toBe(false);
+  });
+
+  it("listDocuments with no filters hits the bare endpoint", async () => {
+    const url = captureUrl();
+    const api = new PaperlessAPI("http://x", "t");
+    await api.listDocuments();
+    expect(url()).toMatch(/\/documents\/$/);
+  });
+
+  it("builds the document detail sub-resource URLs", async () => {
+    for (const [method, fragment] of [
+      ["getDocumentSuggestions", "/documents/7/suggestions/"],
+      ["getDocumentNotes", "/documents/7/notes/"],
+      ["getDocumentMetadata", "/documents/7/metadata/"],
+      ["getDocumentHistory", "/documents/7/history/"],
+    ] as const) {
+      const url = captureUrl();
+      const api = new PaperlessAPI("http://x", "t");
+      await (api as any)[method](7);
+      expect(url()).toContain(fragment);
+    }
+  });
+
+  it("deleteDocumentNote targets the note by id query param", async () => {
+    const url = captureUrl();
+    const api = new PaperlessAPI("http://x", "t");
+    await api.deleteDocumentNote(7, 9);
+    expect(url()).toContain("/documents/7/notes/?id=9");
+  });
 });
 
 describe("PaperlessAPI.postDocument custom_fields encoding", () => {
