@@ -1,15 +1,14 @@
 # Paperless MCP
 
 > [!NOTE]
-> This is a maintained fork. Upstream
-> [nloui/paperless-mcp](https://github.com/nloui/paperless-mcp) looks abandoned —
-> currently [4 open issues](https://github.com/nloui/paperless-mcp/issues) and
-> [7 open pull requests](https://github.com/nloui/paperless-mcp/pulls) sitting
-> unmerged, its npm package
+> A maintained fork of
+> [nloui/paperless-mcp](https://github.com/nloui/paperless-mcp), which looks
+> abandoned — [4 issues](https://github.com/nloui/paperless-mcp/issues) and
+> [7 pull requests](https://github.com/nloui/paperless-mcp/pulls) sit unmerged,
+> its npm package
 > [`@fastmcp-me/paperless-mcp`](https://www.npmjs.com/package/@fastmcp-me/paperless-mcp)
-> last published October 4, 2025, and no image was ever shipped to Docker Hub.
-> This fork is now actively maintained by
-> [@joestump](https://github.com/joestump) and
+> last published Oct 4, 2025, and it never shipped to Docker Hub — now
+> maintained by [Joe Stump](https://github.com/joestump) and
 > [Claude Code](https://claude.com/claude-code).
 
 An [MCP](https://modelcontextprotocol.io) (Model Context Protocol) server that
