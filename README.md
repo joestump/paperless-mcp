@@ -1,30 +1,41 @@
 # Paperless MCP
 
+> [!NOTE]
+> A maintained fork of
+> [nloui/paperless-mcp](https://github.com/nloui/paperless-mcp), which looks
+> abandoned — [4 issues](https://github.com/nloui/paperless-mcp/issues) and
+> [7 pull requests](https://github.com/nloui/paperless-mcp/pulls) sit unmerged,
+> its npm package
+> [`@fastmcp-me/paperless-mcp`](https://www.npmjs.com/package/@fastmcp-me/paperless-mcp)
+> last published Oct 4, 2025, and it never shipped to Docker Hub — now
+> maintained by [Joe Stump](https://github.com/joestump) and
+> [Claude Code](https://claude.com/claude-code).
+
 An [MCP](https://modelcontextprotocol.io) (Model Context Protocol) server that
 wraps the [Paperless-NGX](https://docs.paperless-ngx.com/) REST API, so an AI
 assistant like Claude can search, organize, and manage your documents, tags,
 correspondents, document types, storage paths, custom fields, and background
 tasks.
 
-This is a fork of [nloui/paperless-mcp](https://github.com/nloui/paperless-mcp).
-Upstream appears unmaintained ([PRs have languished for a long
-time](https://github.com/nloui/paperless-mcp/issues)), so this fork carries
-substantial fixes and ~35 tools' worth of additional API coverage, a unit-test
-suite, and corrected API conformance. It is **not** published to npm — install
-from source (see below).
+This fork carries substantial fixes, ~35 tools' worth of additional API
+coverage, a unit-test suite, and corrected API conformance. It is **not**
+published to the public npm registry — run it with `npx` straight from GitHub
+(see below).
 
 ## Contents
 
 - [Features](#features)
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
-- [Installation](#installation)
+- [Quick start](#quick-start)
 - [Running the server](#running-the-server)
   - [Configuration](#configuration)
 - [Using with Claude (MCP client setup)](#using-with-claude-mcp-client-setup)
   - [Claude Desktop](#claude-desktop)
   - [Claude Code](#claude-code)
   - [Docker](#docker)
+- [Installing from GitHub Packages (optional)](#installing-from-github-packages-optional)
+- [Building from source (development)](#building-from-source-development)
 - [Tools](#tools)
 - [Development](#development)
 - [Acknowledgments](#acknowledgments)
@@ -67,19 +78,20 @@ The Paperless REST API version is pinned via the `Accept` header (currently
   2. Click your username (top right) → **My Profile**.
   3. Click the circular arrow to generate an API token.
 
-## Installation
+## Quick start
 
-Not on npm — clone and build from source:
+This fork is **not published to the public npm registry**. Run it on demand with
+`npx`, straight from this GitHub repo — no global install and no registry login:
 
 ```bash
-git clone https://github.com/joestump/paperless-mcp.git
-cd paperless-mcp
-npm install
-npm run build
+npx -y github:joestump/paperless-mcp <baseUrl> <token>
+# e.g.
+npx -y github:joestump/paperless-mcp https://paperless.example.com YOUR_API_TOKEN
 ```
 
-This compiles the server to `build/index.js`, which is the entry point you
-point your MCP client at.
+The first run clones and builds the repo (it compiles automatically via the
+`prepare` script); npx caches it afterward. Pin a specific release with a tag,
+e.g. `github:joestump/paperless-mcp#v1.1.0`.
 
 ## Running the server
 
@@ -88,9 +100,7 @@ The server speaks two transports.
 **stdio** (default — what MCP clients launch):
 
 ```bash
-node build/index.js <baseUrl> <token>
-# e.g.
-node build/index.js https://paperless.example.com YOUR_API_TOKEN
+npx -y github:joestump/paperless-mcp <baseUrl> <token>
 ```
 
 **HTTP** (Streamable HTTP transport, for hosting it as a service):
@@ -98,7 +108,7 @@ node build/index.js https://paperless.example.com YOUR_API_TOKEN
 ```bash
 # Reads credentials from the environment, not the CLI:
 PAPERLESS_URL=https://paperless.example.com API_KEY=YOUR_API_TOKEN \
-  node build/index.js --http --port 3000
+  npx -y github:joestump/paperless-mcp --http --port 3000
 ```
 
 - `POST /mcp` serves the MCP API (each request handled statelessly).
@@ -131,9 +141,10 @@ Edit your `claude_desktop_config.json`:
 {
   "mcpServers": {
     "paperless": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "/absolute/path/to/paperless-mcp/build/index.js",
+        "-y",
+        "github:joestump/paperless-mcp",
         "https://paperless.example.com",
         "YOUR_API_TOKEN"
       ]
@@ -148,14 +159,15 @@ Restart Claude Desktop after editing the config.
 
 ```bash
 claude mcp add paperless -- \
-  node /absolute/path/to/paperless-mcp/build/index.js \
+  npx -y github:joestump/paperless-mcp \
   https://paperless.example.com YOUR_API_TOKEN
 ```
 
 ### Docker
 
 A `Dockerfile` is included; it builds the server and runs the HTTP transport on
-port 3000.
+port 3000. Released images are also pushed to the GitHub Container Registry
+(`ghcr.io`).
 
 ```bash
 docker build -t paperless-mcp .
@@ -163,6 +175,35 @@ docker run --rm -p 3000:3000 \
   -e PAPERLESS_URL=https://paperless.example.com \
   -e API_KEY=YOUR_API_TOKEN \
   paperless-mcp
+```
+
+## Installing from GitHub Packages (optional)
+
+Each GitHub Release also publishes `@joestump/paperless-mcp` to **GitHub
+Packages**. GitHub Packages requires authentication even for public packages, so
+add an `.npmrc` with a token that has the `read:packages` scope:
+
+```ini
+@joestump:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=YOUR_GITHUB_TOKEN
+```
+
+then run the published, versioned package:
+
+```bash
+npx @joestump/paperless-mcp <baseUrl> <token>
+```
+
+If you'd rather not manage a token, prefer `npx github:joestump/paperless-mcp`
+(above), which needs no auth.
+
+## Building from source (development)
+
+```bash
+git clone https://github.com/joestump/paperless-mcp.git
+cd paperless-mcp
+npm install          # also builds via the prepare script
+node build/index.js <baseUrl> <token>
 ```
 
 ## Tools
