@@ -2,7 +2,10 @@
 FROM node:20-slim AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+# --ignore-scripts so the `prepare` (build) lifecycle script does not run here:
+# src/ hasn't been copied yet, so tsc would have nothing to compile. We build
+# explicitly after copying the sources.
+RUN npm ci --ignore-scripts
 COPY . .
 RUN npm run build
 
